@@ -9,17 +9,17 @@ permissions:
 jobs:
   review:
     name: Static Review (cppcheck)
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install cppcheck
-        shell: pwsh
-        run: choco install cppcheck -y --no-progress
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
 
       - name: Run cppcheck
-        shell: pwsh
         run: |
           cppcheck --enable=warning,style,performance,portability --std=c++17 --error-exitcode=1 --inline-suppr --suppress=missingIncludeSystem --quiet "Visualization for Hexo/src" "Visualization for Hexo/main.cpp"
 
