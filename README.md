@@ -1,4 +1,15 @@
-# Visualization for Hexo
+<p align="center">
+	<img src="https://files.seeusercontent.com/2026/03/13/o5iD/Visualization-for-Hexo.png" alt="Visualization for Hexo" />
+</p>
+
+<p align="center">
+	<img src="https://img.shields.io/badge/project-Visualization_for_Hexo-4c566a" alt="project" />
+	<img src="https://img.shields.io/badge/stack-Qt%20%2B%20QML-0f766e" alt="qt-qml" />
+	<img src="https://img.shields.io/badge/blog-Hexo-2563eb" alt="hexo" />
+	<img src="https://img.shields.io/badge/platform-Windows-0ea5e9" alt="windows" />
+	<img src="https://img.shields.io/badge/language-C%2B%2B17-16a34a" alt="cxx17" />
+</p>
+
 
 一个基于 Qt/QML 的 Hexo 可视化管理工具，面向本地博客内容编辑与发布流程。
 
