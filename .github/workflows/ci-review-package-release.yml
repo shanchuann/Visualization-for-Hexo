@@ -43,7 +43,7 @@ jobs:
       - name: Package app
         shell: pwsh
         run: |
-          & "./Visualization for Hexo/scripts/package.ps1" -Configuration Release -Platform x64
+          & "./Visualization for Hexo/scripts/package.ps1" -Configuration Release -Platform x64 -Toolset v143
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v4

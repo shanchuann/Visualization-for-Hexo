@@ -1,6 +1,7 @@
 param(
     [string]$Configuration = "Release",
-    [string]$Platform = "x64"
+    [string]$Platform = "x64",
+    [string]$Toolset = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +21,11 @@ if ($env:Qt6_DIR) {
     $qtRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $qt6Dir))
     $msbuildArgs += "/p:QtInstall=$qtRoot"
     Write-Host "[package] QtInstall override from Qt6_DIR: $qtRoot"
+}
+
+if ($Toolset) {
+    $msbuildArgs += "/p:PlatformToolset=$Toolset"
+    Write-Host "[package] PlatformToolset override: $Toolset"
 }
 
 function Find-WinDeployQt {
@@ -64,6 +70,9 @@ function Find-WinDeployQt {
 
 Write-Host "[package] build $Configuration|$Platform"
 msbuild @msbuildArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "msbuild failed with exit code $LASTEXITCODE"
+}
 
 $exe = Join-Path $root "x64/$Configuration/Visualization for Hexo.exe"
 if (-not (Test-Path $exe)) {
