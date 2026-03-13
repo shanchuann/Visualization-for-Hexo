@@ -7,6 +7,21 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $proj = Join-Path $root "Visualization for Hexo.vcxproj"
 
+$msbuildArgs = @(
+    $proj,
+    "/t:Build",
+    "/p:Configuration=$Configuration",
+    "/p:Platform=$Platform",
+    "/v:minimal"
+)
+
+if ($env:Qt6_DIR) {
+    $qt6Dir = Resolve-Path $env:Qt6_DIR
+    $qtRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $qt6Dir))
+    $msbuildArgs += "/p:QtInstall=$qtRoot"
+    Write-Host "[package] QtInstall override from Qt6_DIR: $qtRoot"
+}
+
 function Find-WinDeployQt {
     if ($env:WINDEPLOYQT_EXE -and (Test-Path $env:WINDEPLOYQT_EXE)) {
         return $env:WINDEPLOYQT_EXE
@@ -48,7 +63,7 @@ function Find-WinDeployQt {
 }
 
 Write-Host "[package] build $Configuration|$Platform"
-msbuild $proj /t:Build /p:Configuration=$Configuration /p:Platform=$Platform /v:minimal
+msbuild @msbuildArgs
 
 $exe = Join-Path $root "x64/$Configuration/Visualization for Hexo.exe"
 if (-not (Test-Path $exe)) {
