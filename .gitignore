@@ -1,0 +1,55 @@
+# Visual Studio and VS Code
+.vs/
+.vscode/
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+*.opensdf
+
+# Build outputs
+**/[Dd]ebug/
+**/[Rr]elease/
+**/x64/
+**/x86/
+out/
+build/
+
+# Intermediate and binary files
+*.obj
+*.o
+*.pch
+*.ilk
+*.idb
+*.ipdb
+*.iobj
+*.pdb
+*.exe
+*.dll
+*.lib
+*.exp
+*.log
+*.tmp
+*.tlog
+*.lastbuildstate
+*.recipe
+*.cache
+
+# Qt generated/cache
+*.qmlc
+*.jsc
+*.prl
+*.qmake.stash
+*.pro.user
+
+# Python and Node
+.venv/
+venv/
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local workspace artifacts
+Visualization for Hexo/Visualiz.18A6F1D9/

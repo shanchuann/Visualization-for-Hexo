@@ -1,0 +1,33 @@
+<RCC>
+    <qresource prefix="/qt/qml/visualization for hexo">
+        <file>main.qml</file>
+        <file>data/hexo_metrics.json</file>
+        <file>assets/app-icon.svg</file>
+        <file>assets/app-icon.png</file>
+        <file>components/IconImage.qml</file>
+        <file>assets/iconpark/menu.svg</file>
+        <file>assets/iconpark/close.svg</file>
+        <file>assets/iconpark/minus.svg</file>
+        <file>assets/iconpark/square.svg</file>
+        <file>assets/iconpark/copy.svg</file>
+        <file>assets/iconpark/plus.svg</file>
+        <file>assets/iconpark/delete.svg</file>
+        <file>assets/iconpark/setting.svg</file>
+        <file>assets/iconpark/play.svg</file>
+        <file>assets/iconpark/rocket.svg</file>
+        <file>assets/iconpark/code.svg</file>
+        <file>assets/iconpark/preview-open.svg</file>
+        <file>assets/iconpark/up.svg</file>
+        <file>assets/iconpark/down.svg</file>
+        <file>assets/iconpark/check.svg</file>
+        <file>assets/iconpark/HugeiconsCheckmarkCircle02.svg</file>
+        <file>assets/iconpark/MeteorIconsSidebar.svg</file>
+        <file>assets/iconpark/TablerLayoutBottombar.svg</file>
+        <file>assets/iconpark/MaterialSymbolsAddCircleOutline.svg</file>
+        <file>qml/MainWindow.qml</file>
+        <file>qml/PostList.qml</file>
+        <file>qml/EditorHost.qml</file>
+        <file>qml/ConsolePanel.qml</file>
+        <file>web/markdown-editor/index.html</file>
+    </qresource>
+</RCC>
