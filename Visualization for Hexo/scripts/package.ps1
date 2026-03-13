@@ -8,6 +8,24 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $proj = Join-Path $root "Visualization for Hexo.vcxproj"
 
+function Resolve-QtInstallDir {
+    if ($env:QT_ROOT_DIR -and (Test-Path $env:QT_ROOT_DIR)) {
+        return (Resolve-Path $env:QT_ROOT_DIR).Path
+    }
+
+    if ($env:Qt6_DIR -and (Test-Path $env:Qt6_DIR)) {
+        $qt6Dir = (Resolve-Path $env:Qt6_DIR).Path
+        # .../msvc2022_64/lib/cmake/Qt6 -> .../msvc2022_64
+        return (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $qt6Dir)))
+    }
+
+    if ($env:QTDIR -and (Test-Path $env:QTDIR)) {
+        return (Resolve-Path $env:QTDIR).Path
+    }
+
+    return $null
+}
+
 $msbuildArgs = @(
     $proj,
     "/t:Build",
@@ -16,11 +34,10 @@ $msbuildArgs = @(
     "/v:minimal"
 )
 
-if ($env:Qt6_DIR) {
-    $qt6Dir = Resolve-Path $env:Qt6_DIR
-    $qtRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $qt6Dir))
-    $msbuildArgs += "/p:QtInstall=$qtRoot"
-    Write-Host "[package] QtInstall override from Qt6_DIR: $qtRoot"
+$qtInstallDir = Resolve-QtInstallDir
+if ($qtInstallDir) {
+    $msbuildArgs += "/p:QtInstall=$qtInstallDir"
+    Write-Host "[package] QtInstall override: $qtInstallDir"
 }
 
 if ($Toolset) {
@@ -38,10 +55,9 @@ function Find-WinDeployQt {
         return $cmd.Source
     }
 
-    if ($env:Qt6_DIR) {
-        $qt6Dir = Resolve-Path $env:Qt6_DIR
-        $qtRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $qt6Dir))
-        $candidate = Join-Path $qtRoot "bin\windeployqt.exe"
+    $qtInstallDir = Resolve-QtInstallDir
+    if ($qtInstallDir) {
+        $candidate = Join-Path $qtInstallDir "bin\windeployqt.exe"
         if (Test-Path $candidate) {
             return $candidate
         }
