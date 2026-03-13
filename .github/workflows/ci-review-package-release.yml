@@ -21,15 +21,7 @@ jobs:
       - name: Run cppcheck
         shell: pwsh
         run: |
-          cppcheck \
-            --enable=warning,style,performance,portability \
-            --std=c++17 \
-            --error-exitcode=1 \
-            --inline-suppr \
-            --suppress=missingIncludeSystem \
-            --quiet \
-            "Visualization for Hexo/src" \
-            "Visualization for Hexo/main.cpp"
+          cppcheck --enable=warning,style,performance,portability --std=c++17 --error-exitcode=1 --inline-suppr --suppress=missingIncludeSystem --quiet "Visualization for Hexo/src" "Visualization for Hexo/main.cpp"
 
   package:
     name: Build and Package (Windows)
