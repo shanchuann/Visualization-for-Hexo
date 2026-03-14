@@ -17,6 +17,8 @@
 
 - 文章列表浏览与切换
 - Markdown 编辑与预览联动
+- Front Matter 解析增强（title/date/categories/tags/views/cover/description）
+- 缺失 description 时可自动调用 GLM-4.7-flash 生成摘要
 - Hexo 常用命令集成（构建、发布等）
 - Git 操作能力封装（提交、状态查询等）
 - QML 现代化界面与自定义无边框窗口
@@ -32,7 +34,7 @@
 
 - Windows 10/11
 - Visual Studio 2022（建议包含 MSVC x64 编译工具）
-- Qt 6.8以上（当前工程使用 Qt/MSBuild 集成）
+- Qt 6.9+（MSVC 2022 64-bit，Qt/MSBuild 集成）
 - 可选：Node.js、Hexo CLI、Git（用于实际博客流程）
 
 ## 快速开始
@@ -56,18 +58,46 @@ cd Visualization-for-Hexo
 & ".\Visualization for Hexo\x64\Debug\Visualization for Hexo.exe"
 ```
 
+4. （可选）启用 GLM 自动描述
+
+```powershell
+$env:ZHIPUAI_API_KEY = "你的 API Key"
+```
+
+说明：当文章 front matter 没有 `description` 且正文不为空时，应用会默认调用 `glm-4.7-flash` 自动生成描述并写回文章头。
+
 ## 构建与打包
 
 - 调试构建脚本：`Visualization for Hexo/scripts/build.ps1`
 - 发布构建/打包入口：`Visualization for Hexo/scripts/package.ps1`
 
+调试构建示例：
+
+```powershell
+& ".\Visualization for Hexo\scripts\build.ps1" -Configuration Debug -Platform x64 -Clean
+```
+
 发布构建示例：
 
 ```powershell
-& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Release -Platform x64
+& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Release -Platform x64 -Toolset v143 -Clean
 ```
 
-说明：`package.ps1` 已完成 Release 编译、`windeployqt` 依赖收集，并输出可分发 zip 包。
+常用参数：
+
+- `-QtInstall` 指定 Qt 安装目录（等价于设置 `QT_ROOT_DIR`）
+- `-Toolset` 覆盖 `PlatformToolset`（例如 `v143`）
+- `-Clean` 执行 Clean + Build
+- `-DistRoot` 指定 dist 输出目录
+- `-IncludePdb` 将 PDB 复制进包
+- `-SkipKill` 跳过停止正在运行的应用
+
+说明：`package.ps1` 会完成 Release 编译、`windeployqt` 依赖收集，并输出可分发 zip 包，同时拷贝 README 和 LICENSE。
+
+## CI/CD
+
+- Push 到 `main` 会执行 cppcheck 静态检查并生成 Windows 打包产物
+- Push `v*` tag 或手动触发工作流时，会发布 GitHub Release（tag 发布为正式版本，手动触发为预发布）
 
 ## 目录结构
 

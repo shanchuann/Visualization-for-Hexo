@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Window 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Dialogs
 import "components"
 
 ApplicationWindow {
@@ -9,7 +10,15 @@ ApplicationWindow {
         sequences: ["Ctrl+S"]
         onActivated: {
             if (appContext.openedPostPath && appContext.openedPostPath.length > 0) {
-                appContext.saveOpenedPost(titleInput.text, categoryInput.editText, tagsInput.editText, dateInput.editText, bodyEdit.text);
+                appContext.saveOpenedPost(
+                    titleInput.text,
+                    categoryInput.editText,
+                    tagsInput.editText,
+                    dateInput.editText,
+                    coverInput.text,
+                    descriptionInput.text,
+                    bodyEdit.text
+                );
             }
         }
     }
@@ -23,7 +32,7 @@ ApplicationWindow {
     minimumWidth: 1100
     minimumHeight: 700
     title: "Visualization for Hexo"
-    flags: Qt.Window
+    flags: Qt.Window | Qt.FramelessWindowHint
     color: layoutBg
 
     Rectangle {
@@ -103,6 +112,7 @@ ApplicationWindow {
         trendMax: 1
     })
     property string liveMarkdownText: ""
+    property string previewCoverSource: ""
     property var envStatus: ({ node: false, hexo: false, git: false, project: false })
     property bool envStatusVisible: false
     property string pendingInitProjectPath: ""
@@ -119,6 +129,16 @@ ApplicationWindow {
         if (consoleVisible && consoleRect) {
             consoleRect.expanded = true
         }
+        Qt.callLater(function() {
+            if (centerContentSplit) {
+                centerContentSplit.forceLayout()
+            }
+        })
+        Qt.callLater(function() {
+            if (centerContentSplit) {
+                centerContentSplit.forceLayout()
+            }
+        })
     }
 
     onArticleViewModeChanged: {
@@ -201,11 +221,9 @@ ApplicationWindow {
     }
 
     function showWindowMaximizedSafe() {
-        root.rememberNormalWindowGeometry();
-        root.suppressResizeDegrade = true;
-        root.resizeDegrade = true;
-        root.showMaximized();
-        geometryTransitionTimer.restart();
+        root.rememberNormalWindowGeometry()
+        root.showMaximized()
+        windowStateRefreshTimer.restart()
     }
 
     function screenForGlobalPoint(globalX, globalY) {
@@ -244,12 +262,10 @@ ApplicationWindow {
 
     function toggleMaximizeRestore() {
         if (root.isWindowMaximized) {
-            root.suppressResizeDegrade = true;
-            root.resizeDegrade = true;
-            root.showNormal();
-            geometryTransitionTimer.restart();
+            root.showNormal()
+            windowStateRefreshTimer.restart()
         } else {
-            root.showWindowMaximizedSafe();
+            root.showWindowMaximizedSafe()
         }
     }
 
@@ -275,7 +291,10 @@ ApplicationWindow {
         if (!forceRender && (!editorContent || !editorContent.isMarkdown)) {
             return;
         }
+        var coverUrl = appContext.resolveCoverForPreview(coverInput.text, appContext.openedPostPath || "") || "";
+        root.previewCoverSource = coverUrl
         var nextText = bodyEdit.text || "";
+        nextText = nextText.replace(/^\s*\n+/, "")
         var nextPreview = appContext.renderMarkdownForPreview(nextText, root.uiBodyFontSize, root.uiLineSpacing);
         if (root.liveMarkdownText !== nextPreview) {
             root.liveMarkdownText = nextPreview;
@@ -473,13 +492,14 @@ ApplicationWindow {
         implicitHeight: root.controlHeight
         font.pixelSize: 13
         leftPadding: 16
-        rightPadding: 16
+        rightPadding: 30
         
         indicator: Item {
-            x: cb.width - width - cb.rightPadding
+            x: cb.width - width - 6
             y: cb.topPadding + (cb.availableHeight - height) / 2
-            width: 20
+            width: 28
             height: 20
+            z: 3
 
             IconImage {
                 anchors.centerIn: parent
@@ -494,6 +514,8 @@ ApplicationWindow {
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
+                preventStealing: true
+                propagateComposedEvents: false
                 onClicked: {
                     if (!cb.popup) return;
                     if (cb.popup.visible) {
@@ -1007,15 +1029,167 @@ ApplicationWindow {
 
         RowLayout {
             anchors.fill: parent
-                anchors.leftMargin: 8
+            anchors.leftMargin: 8
             anchors.rightMargin: 8
             spacing: 4
 
             Row {
                 Layout.alignment: Qt.AlignVCenter
-                    Layout.leftMargin: 0
-                spacing: 6
+                Layout.leftMargin: 14
+                spacing: 10
 
+                Row {
+                    spacing: 8
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Rectangle {
+                        width: 14
+                        height: 14
+                        radius: 7
+                        color: "#FF5F57"
+                        border.width: 1
+                        border.color: "#E04842"
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.close()
+                        }
+                    }
+
+                    Rectangle {
+                        width: 14
+                        height: 14
+                        radius: 7
+                        color: "#FFBD2E"
+                        border.width: 1
+                        border.color: "#DEA123"
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.showMinimized()
+                        }
+                    }
+
+                    Rectangle {
+                        width: 14
+                        height: 14
+                        radius: 7
+                        color: "#28C840"
+                        border.width: 1
+                        border.color: "#18A42E"
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.toggleMaximizeRestore()
+                        }
+                    }
+                }
+
+            }
+
+            Item { Layout.fillWidth: true }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignVCenter
+                spacing: 12
+
+                Rectangle {
+                    id: taskIndicatorInline
+                    visible: appContext.taskRunning
+                    width: taskRunningRowInline.implicitWidth + 22
+                    height: 28
+                    radius: 14
+                    color: "#FFF3E0"
+                    border.width: 1
+                    border.color: "#FFD3A4"
+
+                    Row {
+                        id: taskRunningRowInline
+                        anchors.centerIn: parent
+                        spacing: 8
+
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 7
+                            height: 7
+                            radius: 3.5
+                            color: "#E65100"
+                            SequentialAnimation on opacity {
+                                loops: Animation.Infinite
+                                NumberAnimation { to: 0.3; duration: 600 }
+                                NumberAnimation { to: 1.0; duration: 600 }
+                            }
+                        }
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "任务运行中..."
+                            color: "#E65100"
+                            font.pixelSize: 12
+                            font.weight: Font.Medium
+                        }
+                    }
+                }
+
+                // ---- Preview button (MD3 Tonal) ----
+                UiButton {
+                    text: "预览"
+                    tone: "tonal"
+                    compact: true
+                    implicitWidth: 72
+                    implicitHeight: root.topBarButtonSize
+                    onClicked: {
+                        root.consoleVisible = true
+                        appContext.appendStructuredLog("info", "PREVIEW_CLICK", "requested: hexo server")
+                        if (!appContext.currentProjectPath || appContext.currentProjectPath.length === 0) {
+                            appContext.appendStructuredLog("warn", "PREVIEW_NO_PROJECT", "请先选择 Hexo 项目后再预览")
+                            return
+                        }
+                        var env = appContext.environmentCheck()
+                        if (!env.hexo) {
+                            appContext.appendStructuredLog("warn", "PREVIEW_NO_HEXO", "未检测到 hexo 命令，请先安装并配置环境")
+                        }
+                        appContext.runHexoServer()
+                    }
+                }
+
+                // ---- Publish button (MD3 Filled) ----
+                UiButton {
+                    text: "发布"
+                    tone: "filled"
+                    compact: true
+                    implicitWidth: 72
+                    implicitHeight: root.topBarButtonSize
+                    onClicked: {
+                        root.consoleVisible = true
+                        appContext.appendStructuredLog("info", "DEPLOY_CLICK", "requested: hexo deploy")
+                        if (!appContext.currentProjectPath || appContext.currentProjectPath.length === 0) {
+                            appContext.appendStructuredLog("warn", "DEPLOY_NO_PROJECT", "请先选择 Hexo 项目后再发布")
+                            return
+                        }
+                        var env = appContext.environmentCheck()
+                        if (!env.hexo || !env.git) {
+                            appContext.appendStructuredLog("warn", "DEPLOY_ENV", "发布依赖 hexo 和 git，请检查环境")
+                        }
+                        appContext.runHexoDeploy()
+                    }
+                }
+
+                // ---- Settings button ----
+                IconActionButton {
+                    width: root.topBarButtonSize
+                    height: root.topBarButtonSize
+                    iconSource: root.iconBase + "setting.svg"
+                    toolTipText: "设置"
+                    onClicked: {
+                        if (settingsDrawer.opened) {
+                            settingsDrawer.close()
+                        } else {
+                            settingsDrawer.open()
+                        }
+                    }
+                }
+                
                 IconActionButton {
                     width: root.topBarButtonSize
                     height: root.topBarButtonSize
@@ -1034,187 +1208,71 @@ ApplicationWindow {
                     toolTipText: "开关底栏"
                     onClicked: root.toggleConsoleVisibility()
                 }
-
-                // Editor mode toggle (placed at top-left, right of bottom bar switch)
-                Rectangle {
-                    width: 148
-                    height: 30
-                    radius: 15
-                    color: root.md3SurfaceContainerHigh
-                    border.width: 1
-                    border.color: root.md3OutlineVariant
-
-                    Row {
-                        anchors.fill: parent
-                        anchors.margins: 2
-                        spacing: 2
-
-                        Rectangle {
-                            width: 71
-                            height: 26
-                            radius: 13
-                            color: !editorContent.isMarkdown ? root.md3SecondaryContainer : "transparent"
-                            Behavior on color { ColorAnimation { duration: 160 } }
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "源码"
-                                font.pixelSize: 13
-                                font.weight: Font.Medium
-                                color: !editorContent.isMarkdown ? root.md3OnSecondaryContainer : root.md3OnSurfaceVariant
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.articleViewMode = 0
-                            }
-                        }
-
-                        Rectangle {
-                            width: 71
-                            height: 26
-                            radius: 13
-                            color: editorContent.isMarkdown ? root.md3SecondaryContainer : "transparent"
-                            Behavior on color { ColorAnimation { duration: 160 } }
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "预览"
-                                font.pixelSize: 13
-                                font.weight: Font.Medium
-                                color: editorContent.isMarkdown ? root.md3OnSecondaryContainer : root.md3OnSurfaceVariant
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.articleViewMode = 1
-                            }
-                        }
-                    }
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            RowLayout {
-                Layout.alignment: Qt.AlignVCenter
-                spacing: 12
-
-                // ---- Preview button (MD3 Tonal) ----
-                UiButton {
-                    text: "预览"
-                    tone: "tonal"
-                    compact: true
-                    implicitWidth: 72
-                    implicitHeight: root.topBarButtonSize
-                    onClicked: appContext.runHexoServer()
-                }
-
-                // ---- Publish button (MD3 Filled) ----
-                UiButton {
-                    text: "发布"
-                    tone: "filled"
-                    compact: true
-                    implicitWidth: 72
-                    implicitHeight: root.topBarButtonSize
-                    onClicked: appContext.runHexoDeploy()
-                }
-
-                // ---- Settings button ----
-                IconActionButton {
-                    width: root.topBarButtonSize
-                    height: root.topBarButtonSize
-                    iconSource: root.iconBase + "setting.svg"
-                    toolTipText: "设置"
-                    onClicked: {
-                        if (settingsDrawer.opened) {
-                            settingsDrawer.close()
-                        } else {
-                            settingsDrawer.open()
-                        }
-                    }
-                }
-                
-                // ---- Window Controls ----
-                Rectangle {
-                    width: 1
-                    height: 20
-                    color: root.md3OutlineVariant
-                    Layout.leftMargin: 8
-                    Layout.rightMargin: 8
-                }
-                
-                IconActionButton {
-                    width: root.topBarButtonSize
-                    height: root.topBarButtonSize
-                    iconSource: root.iconBase + "minus.svg"
-                    toolTipText: "最小化"
-                    onClicked: root.showMinimized()
-                }
-                
-                IconActionButton {
-                    width: root.topBarButtonSize
-                    height: root.topBarButtonSize
-                    iconSource: root.isWindowMaximized ? root.iconBase + "copy.svg" : root.iconBase + "square.svg"
-                    toolTipText: root.isWindowMaximized ? "向下还原" : "最大化"
-                    onClicked: root.toggleMaximizeRestore()
-                }
-                
-                IconActionButton {
-                    width: root.topBarButtonSize
-                    height: root.topBarButtonSize
-                    iconSource: root.iconBase + "close.svg"
-                    toolTipText: "关闭"
-                    danger: true
-                    onClicked: root.close()
-                }
             }
         }
 
-        // ---- Task running indicator (centered in titlebar) ----
         Rectangle {
-            id: taskIndicatorRect
-            visible: appContext.taskRunning
+            id: centeredModeToggle
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.verticalCenter: parent.verticalCenter
-            width: taskRunningRow.implicitWidth + 32
+            width: 148
             height: 30
             radius: 15
-            color: "#FFF3E0"
+            color: root.md3SurfaceContainerHigh
             border.width: 1
-            border.color: "#FFD3A4"
-            z: 15
+            border.color: root.md3OutlineVariant
+            z: 14
 
             Row {
-                id: taskRunningRow
-                anchors.centerIn: parent
-                spacing: 8
+                anchors.fill: parent
+                anchors.margins: 2
+                spacing: 2
 
                 Rectangle {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 8; height: 8; radius: 4; color: "#E65100"
-                    SequentialAnimation on opacity {
-                        loops: Animation.Infinite
-                        NumberAnimation { to: 0.3; duration: 600 }
-                        NumberAnimation { to: 1.0; duration: 600 }
+                    width: 71
+                    height: 26
+                    radius: 13
+                    color: !editorContent.isMarkdown ? root.md3SecondaryContainer : "transparent"
+                    Behavior on color { ColorAnimation { duration: 160 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "源码"
+                        font.pixelSize: 13
+                        font.weight: Font.Medium
+                        color: !editorContent.isMarkdown ? root.md3OnSecondaryContainer : root.md3OnSurfaceVariant
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.articleViewMode = 0
                     }
                 }
 
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "任务运行中..."
-                    color: "#E65100"
-                    font.pixelSize: 13
-                    font.weight: Font.Medium
+                Rectangle {
+                    width: 71
+                    height: 26
+                    radius: 13
+                    color: editorContent.isMarkdown ? root.md3SecondaryContainer : "transparent"
+                    Behavior on color { ColorAnimation { duration: 160 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "预览"
+                        font.pixelSize: 13
+                        font.weight: Font.Medium
+                        color: editorContent.isMarkdown ? root.md3OnSecondaryContainer : root.md3OnSurfaceVariant
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.articleViewMode = 1
+                    }
                 }
             }
         }
-
-
-
-
 
     }
 
@@ -1284,7 +1342,7 @@ ApplicationWindow {
 
                     delegate: Item {
                         property var postEntry: modelData || ({})
-                        width: (root.splitDragDegrade || root.resizeDegrade) ? postsList.quantizedWidth : ListView.view.width
+                        width: ListView.view.width
                         height: 86
 
                         Rectangle {
@@ -1305,7 +1363,7 @@ ApplicationWindow {
                             MouseArea {
                                 id: postMouse
                                 anchors.fill: parent
-                                hoverEnabled: !root.splitDragDegrade && !root.resizeDegrade
+                                hoverEnabled: !root.resizeDegrade
                                 onClicked: {
                                     if (postEntry.path) {
                                         appContext.openPost(postEntry.path)
@@ -1429,7 +1487,7 @@ ApplicationWindow {
                             property bool isMarkdown: true
                             property real computedWidth: Math.max(400, Math.min(980, editorScrollView.width - 72))
                             property real quantizedWidth: Math.max(400, Math.min(980, Math.round(computedWidth / 24) * 24))
-                            width: (root.resizeDegrade || root.splitDragDegrade) ? quantizedWidth : computedWidth
+                            width: computedWidth
                             x: Math.max(24, (editorScrollView.width - width) / 2)
                             y: 32
                             spacing: 20
@@ -1451,50 +1509,122 @@ ApplicationWindow {
                         // Metadata card
                         Rectangle {
                             width: parent.width
-                            height: metaRow.implicitHeight + 24
+                            height: metaCardCol.implicitHeight + 24
                             radius: root.shapeMedium
                             color: root.sidePanelItem
                             border.width: 0
 
-                            RowLayout {
-                                id: metaRow
+                            ColumnLayout {
+                                id: metaCardCol
                                 anchors.fill: parent
                                 anchors.margins: 12
-                                spacing: 12
+                                spacing: 10
 
-                                Text { text: "分类"; color: root.md3OnSurfaceVariant; font.pixelSize: 13; font.weight: Font.Medium }
-                                UiComboBox {
-                                    id: categoryInput
-                                    editable: true
-                                    model: appContext.allCategories
-                                    editText: appContext.openedPostCategory
+                                RowLayout {
                                     Layout.fillWidth: true
-                                    Layout.preferredWidth: 0
-                                }
+                                    spacing: 8
 
-                                Text { text: "标签"; color: root.md3OnSurfaceVariant; font.pixelSize: 13; font.weight: Font.Medium }
-                                UiComboBox {
-                                    id: tagsInput
-                                    editable: true
-                                    model: appContext.allTags
-                                    editText: appContext.openedPostTags
-                                    Layout.fillWidth: true
-                                    Layout.preferredWidth: 0
-                                }
-
-                                Text { text: "时间"; color: root.md3OnSurfaceVariant; font.pixelSize: 13; font.weight: Font.Medium }
-                                UiComboBox {
-                                    id: dateInput
-                                    editable: true
-                                    model: []
-                                    editText: appContext.openedPostDate
-                                    spacing: 0
-                                    indicator: Item {
-                                        width: 0
-                                        height: 0
+                                    Text {
+                                        text: "分类"
+                                        color: root.md3OnSurfaceVariant
+                                        font.pixelSize: 13
+                                        font.weight: Font.Medium
+                                        Layout.preferredWidth: 38
+                                        horizontalAlignment: Text.AlignLeft
                                     }
+                                    UiComboBox {
+                                        id: categoryInput
+                                        editable: true
+                                        model: appContext.allCategories
+                                        editText: appContext.openedPostCategory
+                                        Layout.fillWidth: true
+                                        Layout.preferredWidth: 0
+                                    }
+
+                                    Text {
+                                        text: "标签"
+                                        color: root.md3OnSurfaceVariant
+                                        font.pixelSize: 13
+                                        font.weight: Font.Medium
+                                        Layout.preferredWidth: 38
+                                        horizontalAlignment: Text.AlignLeft
+                                    }
+                                    UiComboBox {
+                                        id: tagsInput
+                                        editable: true
+                                        model: appContext.allTags
+                                        editText: appContext.openedPostTags
+                                        Layout.fillWidth: true
+                                        Layout.preferredWidth: 0
+                                    }
+
+                                    Text {
+                                        text: "时间"
+                                        color: root.md3OnSurfaceVariant
+                                        font.pixelSize: 13
+                                        font.weight: Font.Medium
+                                        Layout.preferredWidth: 38
+                                        horizontalAlignment: Text.AlignLeft
+                                    }
+                                    UiComboBox {
+                                        id: dateInput
+                                        editable: true
+                                        model: []
+                                        editText: appContext.openedPostDate
+                                        spacing: 0
+                                        indicator: Item {
+                                            width: 0
+                                            height: 0
+                                        }
+                                        Layout.fillWidth: true
+                                        Layout.preferredWidth: 0
+                                    }
+                                }
+
+                                RowLayout {
                                     Layout.fillWidth: true
-                                    Layout.preferredWidth: 0
+                                    spacing: 8
+
+                                    Text { text: "封面"; color: root.md3OnSurfaceVariant; font.pixelSize: 13; font.weight: Font.Medium; Layout.preferredWidth: 38 }
+                                    UiTextField {
+                                        id: coverInput
+                                        Layout.fillWidth: true
+                                        text: appContext.openedPostCover
+                                        placeholderText: "/images/cover.jpg 或完整 URL"
+                                        onTextChanged: {
+                                            if (editorContent && editorContent.isMarkdown && !root.degradeRendering) {
+                                                previewRenderTimer.restart()
+                                            }
+                                        }
+                                    }
+                                    UiButton {
+                                        text: "选择图片"
+                                        tone: "outlined"
+                                        onClicked: coverFileDialog.open()
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+
+                                    Text { text: "描述"; color: root.md3OnSurfaceVariant; font.pixelSize: 13; font.weight: Font.Medium; Layout.preferredWidth: 38 }
+                                    UiTextField {
+                                        id: descriptionInput
+                                        Layout.fillWidth: true
+                                        text: appContext.openedPostDescription
+                                        placeholderText: "文章摘要（为空时保存将自动生成）"
+                                    }
+                                    UiButton {
+                                        text: "生成描述"
+                                        tone: "tonal"
+                                        onClicked: {
+                                            var generated = appContext.generateDescriptionText(titleInput.text, bodyEdit.text)
+                                            if (generated && generated.length > 0) {
+                                                descriptionInput.text = generated
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1506,7 +1636,12 @@ ApplicationWindow {
                         StackLayout {
                             visible: !root.degradeRendering
                             width: parent.width
-                            height: Math.max(editorContent.isMarkdown ? mdPreview.implicitHeight : bodyEdit.contentHeight, 240)
+                            height: Math.max(
+                                editorContent.isMarkdown
+                                    ? (mdPreview.implicitHeight + (coverPreview.visible ? (coverPreview.height + 10) : 0))
+                                    : bodyEdit.contentHeight,
+                                240
+                            )
                             currentIndex: editorContent.isMarkdown ? 1 : 0
 
                             TextEdit {
@@ -1528,19 +1663,40 @@ ApplicationWindow {
                                 }
                             }
 
-                            Text {
-                                id: mdPreview
+                            Column {
                                 width: parent.width
-                                text: root.liveMarkdownText
-                                textFormat: Text.RichText
-                                wrapMode: Text.WordWrap
-                                renderType: Text.NativeRendering
-                                font.pixelSize: root.uiBodyFontSize
-                                font.family: "SimSun"
-                                lineHeight: root.uiLineSpacing
-                                lineHeightMode: Text.ProportionalHeight
-                                color: root.readingInk
-                                onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                                spacing: 10
+
+                                Image {
+                                    id: coverPreview
+                                    visible: !!root.previewCoverSource && root.previewCoverSource.length > 0
+                                    width: parent.width
+                                    fillMode: Image.PreserveAspectFit
+                                    source: root.previewCoverSource
+                                    asynchronous: true
+                                    cache: false
+                                    smooth: true
+                                    sourceSize.width: Math.max(400, width)
+                                    sourceSize.height: 560
+                                    height: visible
+                                        ? Math.min(340, Math.max(120, width * 0.5))
+                                        : 0
+                                }
+
+                                Text {
+                                    id: mdPreview
+                                    width: parent.width
+                                    text: root.liveMarkdownText
+                                    textFormat: Text.RichText
+                                    wrapMode: Text.WordWrap
+                                    renderType: Text.NativeRendering
+                                    font.pixelSize: root.uiBodyFontSize
+                                    font.family: "SimSun"
+                                    lineHeight: root.uiLineSpacing
+                                    lineHeightMode: Text.ProportionalHeight
+                                    color: root.readingInk
+                                    onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                                }
                             }
                         }
 
@@ -1583,6 +1739,8 @@ ApplicationWindow {
                     categoryInput.editText = appContext.openedPostCategory
                     tagsInput.editText = appContext.openedPostTags
                     dateInput.editText = appContext.openedPostDate
+                    coverInput.text = appContext.openedPostCover
+                    descriptionInput.text = appContext.openedPostDescription
                     bodyEdit.text = appContext.openedPostBody
                     if (editorContent.isMarkdown) {
                         previewRenderTimer.restart()
@@ -2087,7 +2245,7 @@ ApplicationWindow {
                                         }
                                         UiButton {
                                             text: "添加/切换"
-                                            Layout.preferredWidth: 136
+                                                Layout.preferredWidth: 120
                                             tone: "filled"
                                             onClicked: root.addOrInitializeProject(projPathInput.text)
                                         }
@@ -2810,6 +2968,22 @@ ApplicationWindow {
                 color: root.md3OnSurfaceVariant
                 text: "目录: " + root.pendingInitProjectPath + "\n初始化成功后会自动启动预览服务。"
                 font.pixelSize: 12
+            }
+        }
+    }
+
+    FileDialog {
+        id: coverFileDialog
+        title: "选择封面图片"
+        nameFilters: ["图片文件 (*.png *.jpg *.jpeg *.webp *.gif *.bmp)"]
+        onAccepted: {
+            var selected = selectedFile ? selectedFile.toString() : ""
+            if (!selected || selected.length === 0) {
+                return
+            }
+            var imported = appContext.importCoverToCurrentProject(selected)
+            if (imported && imported.length > 0) {
+                coverInput.text = imported
             }
         }
     }

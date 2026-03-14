@@ -11,7 +11,6 @@ struct Post
     QString categories;
     QString tags;
     QString body;
-    int views = 0;
 
     QVariantMap toVariantMap() const
     {
@@ -22,7 +21,6 @@ struct Post
         m.insert("category", categories);
         m.insert("tags", tags);
         m.insert("body", body);
-        m.insert("views", views);
         return m;
     }
 };

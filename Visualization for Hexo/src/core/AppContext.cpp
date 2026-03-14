@@ -11,6 +11,11 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QEventLoop>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QUrl>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSqlDatabase>
@@ -83,6 +88,41 @@ QString patchSimpleYamlPreserveLayout(const QString &original, const QVariantMap
     return lines.join("\n");
 }
 
+QString readDotEnvValue(const QString &filePath, const QString &key)
+{
+    QFile f(filePath);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return {};
+    }
+
+    QTextStream in(&f);
+    while (!in.atEnd()) {
+        QString line = in.readLine().trimmed();
+        if (line.isEmpty() || line.startsWith('#')) {
+            continue;
+        }
+        if (line.startsWith("export ")) {
+            line = line.mid(7).trimmed();
+        }
+        const int idx = line.indexOf('=');
+        if (idx <= 0) {
+            continue;
+        }
+
+        const QString k = line.left(idx).trimmed();
+        if (k != key) {
+            continue;
+        }
+
+        QString v = line.mid(idx + 1).trimmed();
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith('\'') && v.endsWith('\''))) {
+            v = v.mid(1, v.size() - 2);
+        }
+        return v.trimmed();
+    }
+    return {};
+}
+
 #ifdef Q_OS_WIN
 QList<qint64> findListeningPidsOnPort(const int port)
 {
@@ -137,7 +177,7 @@ bool killProcessByPid(const qint64 pid)
 }
 
 AppContext::AppContext(QObject *parent)
-    : QObject(parent), m_command(new CommandAdapter(this))
+    : QObject(parent), m_command(new CommandAdapter(this)), m_network(new QNetworkAccessManager(this))
 {
     m_debounceGenerate.setSingleShot(true);
     m_debounceGenerate.setInterval(1200);
@@ -227,6 +267,8 @@ QString AppContext::openedPostTitle() const { return m_opened.title; }
 QString AppContext::openedPostCategory() const { return m_opened.category; }
 QString AppContext::openedPostTags() const { return m_opened.tags; }
 QString AppContext::openedPostDate() const { return m_opened.date; }
+QString AppContext::openedPostCover() const { return m_opened.cover; }
+QString AppContext::openedPostDescription() const { return m_opened.description; }
 QString AppContext::openedPostBody() const { return m_opened.body; }
 
 QString AppContext::aiProvider() const { return m_aiProvider; }
@@ -270,7 +312,7 @@ QString AppContext::renderMarkdownForPreview(const QString &markdown,
         "h4{font-size:1.18em;}"
         "a{color:#1B6EF3;text-decoration:none;}"
         "a:hover{text-decoration:underline;}"
-        "img{display:block;margin:18px auto;max-width:100%;height:auto;border-radius:6px;}"
+        "img{display:block;margin:12px auto 14px auto;max-width:100%;max-height:340px;height:auto;object-fit:contain;border-radius:6px;}"
         "pre{margin:14px 0;padding:12px 14px;border-radius:8px;background:#F5F7FC;border:1px solid #E1E6F2;overflow:auto;}"
         "code{font-family:'Cascadia Mono','Consolas','Courier New',monospace;font-size:1.08em;}"
         "pre code{font-size:0.97em;line-height:1.7;color:#1E2A44;background:transparent;}"
@@ -629,7 +671,6 @@ void AppContext::scanPosts()
         item["date"] = p.date;
         item["category"] = p.category;
         item["tags"] = p.tags;
-        item["views"] = p.views;
         m_posts.push_back(item);
     }
     emit postsChanged();
@@ -651,6 +692,8 @@ void AppContext::saveOpenedPost(const QString &title,
                                 const QString &category,
                                 const QString &tags,
                                 const QString &date,
+                                const QString &cover,
+                                const QString &description,
                                 const QString &body)
 {
     if (m_opened.path.isEmpty()) {
@@ -664,7 +707,16 @@ void AppContext::saveOpenedPost(const QString &title,
     m_opened.date = date.trimmed().isEmpty()
         ? QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss")
         : date;
+    m_opened.cover = cover.trimmed();
+    m_opened.description = description.trimmed();
     m_opened.body = body;
+    if (m_opened.description.trimmed().isEmpty() && !m_opened.body.trimmed().isEmpty()) {
+        const QString generated = generateDescriptionWithGlm(m_opened.title, m_opened.body);
+        if (!generated.isEmpty()) {
+            m_opened.description = generated;
+            appendStructuredLog("info", "POST_DESC_GEN", "description generated via GLM-4.7-flash");
+        }
+    }
 
     if (writeMarkdown(m_opened)) {
         appendLog(QString("[post] saved: %1").arg(m_opened.path));
@@ -973,6 +1025,31 @@ QString AppContext::importImageToCurrentProject(const QString &sourceFilePath, c
     return md;
 }
 
+QString AppContext::importCoverToCurrentProject(const QString &sourceFilePathOrUrl)
+{
+    QString source = sourceFilePathOrUrl.trimmed();
+    if (source.isEmpty()) {
+        return {};
+    }
+
+    QUrl url(source);
+    if (url.isValid() && url.isLocalFile()) {
+        source = url.toLocalFile();
+    }
+
+    const QString md = importImageToCurrentProject(source, QStringLiteral("cover"));
+    if (md.isEmpty()) {
+        return {};
+    }
+
+    const int left = md.indexOf('(');
+    const int right = md.lastIndexOf(')');
+    if (left >= 0 && right > left) {
+        return md.mid(left + 1, right - left - 1).trimmed();
+    }
+    return {};
+}
+
 QVariantMap AppContext::diagnosticsReport() const
 {
     QVariantMap report = environmentCheck();
@@ -1047,6 +1124,47 @@ QString AppContext::suggestTitle(const QString &content) const
         return "Hexo Insight " + QDate::currentDate().toString("yyyyMMdd");
     }
     return firstLine;
+}
+
+QString AppContext::generateDescriptionText(const QString &title,
+                                            const QString &body)
+{
+    return generateDescriptionWithGlm(title, body);
+}
+
+QString AppContext::resolveCoverForPreview(const QString &cover,
+                                           const QString &postPath) const
+{
+    const QString raw = cover.trimmed();
+    if (raw.isEmpty()) {
+        return {};
+    }
+
+    const QUrl direct(raw);
+    if (direct.isValid() && !direct.scheme().isEmpty()) {
+        return direct.toString();
+    }
+
+    if (m_currentProjectPath.isEmpty()) {
+        return raw;
+    }
+
+    if (raw.startsWith('/')) {
+        const QString local = QDir(m_currentProjectPath).filePath("source" + raw);
+        return QUrl::fromLocalFile(QDir::cleanPath(local)).toString();
+    }
+
+    if (raw.startsWith("images/")) {
+        const QString local = QDir(m_currentProjectPath).filePath("source/" + raw);
+        return QUrl::fromLocalFile(QDir::cleanPath(local)).toString();
+    }
+
+    QFileInfo postInfo(postPath);
+    const QString baseDir = postInfo.absolutePath().isEmpty()
+        ? postsDirectory()
+        : postInfo.absolutePath();
+    const QString local = QDir(baseDir).filePath(raw);
+    return QUrl::fromLocalFile(QDir::cleanPath(local)).toString();
 }
 
 QString AppContext::appDataRoot() const
@@ -1300,7 +1418,8 @@ AppContext::PostData AppContext::readMarkdown(const QString &filePath)
                 else if (k == "date") p.date = v;
                 else if (k == "categories") p.category = v;
                 else if (k == "tags") p.tags = v;
-                else if (k == "views") p.views = v.toInt();
+                else if (k == "cover") p.cover = v;
+                else if (k == "description") p.description = v;
             }
         } else {
             bodyLines.push_back(line);
@@ -1340,7 +1459,8 @@ bool AppContext::writeMarkdown(const PostData &post)
     out += "date: " + post.date + "\n";
     out += "categories: " + post.category + "\n";
     out += "tags: " + post.tags + "\n";
-    out += "views: " + QString::number(post.views) + "\n";
+    out += "cover: " + post.cover + "\n";
+    out += "description: " + post.description + "\n";
     out += "---\n\n";
     if (post.leadingBlankLines > 0) {
         out += QString(post.leadingBlankLines, QLatin1Char('\n'));
@@ -1556,4 +1676,111 @@ void AppContext::saveAiConfig() const
     if (f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
         f.write(QJsonDocument(o).toJson(QJsonDocument::Indented));
     }
+}
+
+QString AppContext::resolveAiApiKey() const
+{
+    QString key = qEnvironmentVariable("GLM_API_KEY");
+    if (key.trimmed().isEmpty()) {
+        key = qEnvironmentVariable("ZHIPUAI_API_KEY");
+    }
+    if (key.trimmed().isEmpty()) {
+        key = qEnvironmentVariable("OPENAI_API_KEY");
+    }
+
+    if (!key.trimmed().isEmpty()) {
+        return key.trimmed();
+    }
+
+    const QStringList keys = {
+        QStringLiteral("GLM_API_KEY"),
+        QStringLiteral("ZHIPUAI_API_KEY"),
+        QStringLiteral("OPENAI_API_KEY")
+    };
+    const QStringList candidates = {
+        QDir::current().filePath(".env"),
+        QDir(QCoreApplication::applicationDirPath()).filePath(".env"),
+        QDir(QCoreApplication::applicationDirPath()).filePath("../.env")
+    };
+    for (const QString &envFile : candidates) {
+        for (const QString &k : keys) {
+            key = readDotEnvValue(envFile, k);
+            if (!key.trimmed().isEmpty()) {
+                return key.trimmed();
+            }
+        }
+    }
+    return key.trimmed();
+}
+
+QString AppContext::generateDescriptionWithGlm(const QString &title, const QString &body)
+{
+    const QString apiKey = resolveAiApiKey();
+    if (apiKey.isEmpty()) {
+        appendStructuredLog("warn", "AI_KEY_MISSING", "missing GLM API key, skip description generation");
+        return {};
+    }
+
+    QString promptBody = body.trimmed();
+    if (promptBody.size() > 1800) {
+        promptBody = promptBody.left(1800);
+    }
+
+    QJsonObject payload;
+    payload.insert("model", m_aiModel.trimmed().isEmpty() ? "glm-4.7-flash" : m_aiModel.trimmed());
+    payload.insert("temperature", 0.3);
+
+    QJsonArray messages;
+    QJsonObject systemMsg;
+    systemMsg.insert("role", "system");
+    systemMsg.insert("content", "你是博客编辑助手。请生成一段简洁自然的中文文章描述，不超过80字，不要使用引号，不要分点。仅返回描述文本。");
+    messages.append(systemMsg);
+
+    QJsonObject userMsg;
+    userMsg.insert("role", "user");
+    userMsg.insert("content", QString("标题：%1\n正文：\n%2").arg(title, promptBody));
+    messages.append(userMsg);
+    payload.insert("messages", messages);
+
+    QString apiBase = m_aiApiBase.trimmed();
+    if (apiBase.isEmpty()) {
+        apiBase = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+    }
+
+    QNetworkRequest request{QUrl(apiBase)};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setRawHeader("Authorization", QString("Bearer %1").arg(apiKey).toUtf8());
+
+    QNetworkReply *reply = m_network->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    const QByteArray respBytes = reply->readAll();
+    const QNetworkReply::NetworkError err = reply->error();
+    reply->deleteLater();
+
+    if (err != QNetworkReply::NoError) {
+        appendStructuredLog("warn", "AI_REQUEST_FAIL", QString::fromUtf8(respBytes));
+        return {};
+    }
+
+    const QJsonDocument respDoc = QJsonDocument::fromJson(respBytes);
+    if (!respDoc.isObject()) {
+        appendStructuredLog("warn", "AI_RESPONSE_INVALID", "invalid JSON response from AI service");
+        return {};
+    }
+
+    const QJsonArray choices = respDoc.object().value("choices").toArray();
+    if (choices.isEmpty() || !choices.first().isObject()) {
+        return {};
+    }
+
+    const QJsonObject msgObj = choices.first().toObject().value("message").toObject();
+    QString content = msgObj.value("content").toString().trimmed();
+    content.remove('\n');
+    if (content.size() > 120) {
+        content = content.left(120).trimmed();
+    }
+    return content;
 }

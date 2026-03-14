@@ -65,7 +65,6 @@ Post PostService::readMarkdown(const QString &filePath)
                 else if (k == "date") p.date = v;
                 else if (k == "categories") p.categories = v;
                 else if (k == "tags") p.tags = v;
-                else if (k == "views") p.views = v.toInt();
             }
         } else {
             bodyLines.push_back(line);

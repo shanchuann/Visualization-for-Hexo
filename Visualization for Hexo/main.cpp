@@ -82,12 +82,16 @@ public:
                     return true;
                 }
 
-                // 给中间留出拖拽判定（避开左右可能存在的按键）
-                // 假设左侧 250px、右侧 260px 有 QML 按钮，我们只把中间作为拖拽区
-                int leftExclude = 250 * dpi / 96;
-                int rightExclude = 260 * dpi / 96;
+                // 中间区域可拖拽，但要避开左侧三色按钮、右侧操作按钮，以及顶部中央源码/预览切换。
+                int leftExclude = 280 * dpi / 96;
+                int rightExclude = 430 * dpi / 96;
+                int centerExcludeHalf = 90 * dpi / 96;
+                int centerX = (winrect.left + winrect.right) / 2;
+                bool inCenterControl = (x >= centerX - centerExcludeHalf && x <= centerX + centerExcludeHalf);
                 if (y >= winrect.top + frameY && y < winrect.top + titleHeight) {
-                    if (x >= winrect.left + leftExclude && x < winrect.right - rightExclude) {
+                    if (!inCenterControl
+                        && x >= winrect.left + leftExclude
+                        && x < winrect.right - rightExclude) {
                         *result = HTCAPTION;
                         return true;
                     }
