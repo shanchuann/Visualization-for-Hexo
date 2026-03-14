@@ -20,8 +20,7 @@
 - Front Matter 解析增强（title/date/categories/tags/views/cover/description）
 - 缺失 description 时可自动调用 GLM-4.7-flash 生成摘要
 - Hexo 常用命令集成（构建、发布等）
-- Git 操作能力封装（提交、状态查询等）
-- QML 现代化界面与自定义无边框窗口
+- 多博客管理支持
 
 ## 技术栈
 
@@ -34,8 +33,12 @@
 
 - Windows 10/11
 - Visual Studio 2022（建议包含 MSVC x64 编译工具）
-- Qt 6.9+（MSVC 2022 64-bit，Qt/MSBuild 集成）
+- Qt 6.8+（MSVC 2022 64-bit，Qt/MSBuild 集成）
 - 可选：Node.js、Hexo CLI、Git（用于实际博客流程）
+
+## 如何使用
+
+直接下载预编译版本（Release 页面）并解压运行exe文件即可，或者按照下面的快速开始指南从源代码构建。
 
 ## 快速开始
 
@@ -58,7 +61,9 @@ cd Visualization-for-Hexo
 & ".\Visualization for Hexo\x64\Debug\Visualization for Hexo.exe"
 ```
 
-4. （可选）启用 GLM 自动描述
+> 说明：默认构建配置为 Debug，输出路径为 `Visualization for Hexo\x64\Debug`。你也可以指定 Release 构建（不推荐，Release 目录下，系统不会自动帮你补全依赖，必须用 windeployqt 或 package.ps1 复制 DLL，否则在没有全局 Qt 环境的机器上会缺少 DLL 无法运行。）。
+
+1. GLM 自动描述（可选）
 
 ```powershell
 $env:ZHIPUAI_API_KEY = "你的 API Key"
@@ -66,21 +71,23 @@ $env:ZHIPUAI_API_KEY = "你的 API Key"
 
 说明：当文章 front matter 没有 `description` 且正文不为空时，应用会默认调用 `glm-4.7-flash` 自动生成描述并写回文章头。
 
+需要配置相关环境变量（例如 `ZHIPUAI_API_KEY`），并确保 `glm-4.7-flash` 可执行文件在系统 PATH 中。
+
 ## 构建与打包
 
 - 调试构建脚本：`Visualization for Hexo/scripts/build.ps1`
-- 发布构建/打包入口：`Visualization for Hexo/scripts/package.ps1`
+- 发布构建/打包脚本：`Visualization for Hexo/scripts/package.ps1`
 
-调试构建示例(把路径换成你本机 Qt 6.9.3 安装目录)：
+调试构建示例(把路径换成你本机 Qt 安装目录)：
 
 ```powershell
-& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Debug -QtInstall "D:\Qt\6.9.3\msvc2022_64"
+& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Debug -QtInstall "D:\Qt\6.8.0\msvc2022_64"
 ```
 
 发布构建示例：
 
 ```powershell
-& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Release -QtInstall "D:\Qt\6.9.3\msvc2022_64"
+& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Release -QtInstall "D:\Qt\6.8.0\msvc2022_64"
 ```
 
 常用参数：
@@ -108,31 +115,32 @@ $env:ZHIPUAI_API_KEY = "你的 API Key"
 
 ```text
 Visualization for Hexo/
-	Visualization for Hexo.slnx
-	libs/material-components-qml/   # QML 组件库（随仓库提交）
-	Visualization for Hexo/
-		main.cpp
-		main.qml
-		src/
-			core/
-			adapters/
-			models/
-		qml/
-		components/
-		web/markdown-editor/
-		scripts/
-			build.ps1
-			package.ps1
+├── Visualization for Hexo.slnx
+├── libs/
+│   └── material-components-qml/      # QML 组件库（随仓库提交）
+├── Visualization for Hexo/
+│   ├── main.cpp
+│   ├── main.qml
+│   ├── src/
+│   │   ├── core/
+│   │   ├── adapters/
+│   │   └── models/
+│   ├── qml/
+│   ├── components/
+│   ├── web/
+│   │   └── markdown-editor/
+│   └── scripts/
+│       ├── build.ps1
+│       └── package.ps1
 ```
 
 ## 开发建议
 
 - 优先使用脚本进行统一构建，避免手动参数不一致
-- 提交前执行一次 Debug 构建，确保工程可编译
+- 提交前本地执行一次 Debug 构建，确保工程可编译
 - 发布前建议在干净环境做一次解压即运行验证，确认依赖齐全
 
 ## 许可证
 
 项目采用MIT许可证，详见根目录 LICENSE 文件。
-
 `libs/material-components-qml` 及其子目录遵循各自上游许可证，请在对应目录查看 LICENSE 文件。
