@@ -1,5 +1,5 @@
 <p align="center">
-	<img src="https://files.seeusercontent.com/2026/03/13/o5iD/Visualization-for-Hexo.png" alt="Visualization for Hexo" />
+	<img src="https://files.seeusercontent.com/2026/03/14/Fqj9/pasted-image-1773481026362.webp" alt="Visualization for Hexo" />
 </p>
 
 <p align="center">
