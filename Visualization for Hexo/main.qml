@@ -27,8 +27,8 @@ ApplicationWindow {
     visible: false
     width: 1100
     height: 700
-    x: Screen.width / 2 - width / 2
-    y: Screen.height / 2 - height / 2
+    x: 0
+    y: 0
     minimumWidth: 1100
     minimumHeight: 700
     title: "Visualization for Hexo"
@@ -116,10 +116,12 @@ ApplicationWindow {
     property var envStatus: ({ node: false, hexo: false, git: false, project: false })
     property bool envStatusVisible: false
     property string pendingInitProjectPath: ""
-    property real normalWindowX: x
-    property real normalWindowY: y
+    property real normalWindowX: 0
+    property real normalWindowY: 0
     property real normalWindowWidth: width
     property real normalWindowHeight: height
+    property real cachedEditorContentWidth: 0
+    property real cachedEditorBodyHeight: 0
     readonly property int edgeSnapThreshold: 18
     readonly property string iconBase: "qrc:/qt/qml/visualization for hexo/assets/iconpark/"
     readonly property bool isWindowMaximized: root.visibility === Window.Maximized || ((root.windowState & Qt.WindowMaximized) !== 0)
@@ -212,11 +214,11 @@ ApplicationWindow {
         }
     }
 
-    function editorBodyHeight() {
-        if (root.degradeRendering) {
-            return 320
-        }
+    function computeEditorContentWidth() {
+        return Math.max(400, Math.min(980, editorScrollView.width - 72))
+    }
 
+    function computeEditorBodyHeight() {
         var previewHeight = mdPreview.implicitHeight
         if (coverPreview.visible) {
             previewHeight += coverPreview.height + 10
@@ -224,6 +226,34 @@ ApplicationWindow {
 
         var contentHeight = editorContent.isMarkdown ? previewHeight : bodyEdit.contentHeight
         return Math.max(contentHeight, 240)
+    }
+
+    function editorContentWidth() {
+        if (root.degradeRendering && root.cachedEditorContentWidth > 0) {
+            return root.cachedEditorContentWidth
+        }
+
+        var nextWidth = computeEditorContentWidth()
+        root.cachedEditorContentWidth = nextWidth
+        return nextWidth
+    }
+
+    function editorBodyHeight() {
+        if (root.degradeRendering && root.cachedEditorBodyHeight > 0) {
+            return root.cachedEditorBodyHeight
+        }
+
+        var nextHeight = computeEditorBodyHeight()
+        root.cachedEditorBodyHeight = nextHeight
+        return nextHeight
+    }
+
+    function restoreNormalGeometry() {
+        root.showNormal()
+        root.x = normalWindowX
+        root.y = normalWindowY
+        root.width = normalWindowWidth
+        root.height = normalWindowHeight
     }
 
     function rememberNormalWindowGeometry() {
@@ -276,7 +306,7 @@ ApplicationWindow {
 
     function toggleMaximizeRestore() {
         if (root.isWindowMaximized) {
-            root.showNormal()
+            root.restoreNormalGeometry()
             windowStateRefreshTimer.restart()
         } else {
             root.showWindowMaximizedSafe()
@@ -959,6 +989,13 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        var sg = root.screen ? root.screen.availableGeometry : Screen.availableGeometry
+        var initX = sg.x + (sg.width - root.width) / 2
+        var initY = sg.y + (sg.height - root.height) / 2
+        root.normalWindowX = initX
+        root.normalWindowY = initY
+        root.x = initX
+        root.y = initY
         root.refreshConfigRows();
         root.liveMarkdownText = "";
         root.envStatus = appContext.environmentCheck();
@@ -1483,6 +1520,10 @@ ApplicationWindow {
                     id: editorViewport
                     anchors.fill: parent
                     clip: true
+                    layer.enabled: root.degradeRendering
+                    layer.smooth: true
+                    layer.mipmap: true
+                    layer.live: !root.degradeRendering
 
                     Flickable {
                         id: editorScrollView
@@ -1499,9 +1540,7 @@ ApplicationWindow {
                         Column {
                             id: editorContent
                             property bool isMarkdown: true
-                            property real computedWidth: Math.max(400, Math.min(980, editorScrollView.width - 72))
-                            property real quantizedWidth: Math.max(400, Math.min(980, Math.round(computedWidth / 24) * 24))
-                            width: root.resizeDegrade ? quantizedWidth : computedWidth
+                            width: root.editorContentWidth()
                             x: Math.max(24, (editorScrollView.width - width) / 2)
                             y: 32
                             spacing: 20
@@ -1648,7 +1687,6 @@ ApplicationWindow {
 
                         // Editor body
                         StackLayout {
-                            visible: !root.degradeRendering
                             width: parent.width
                             height: root.editorBodyHeight()
                             currentIndex: editorContent.isMarkdown ? 1 : 0
@@ -1709,22 +1747,6 @@ ApplicationWindow {
                             }
                         }
 
-                        Rectangle {
-                            visible: root.degradeRendering
-                            width: parent.width
-                            height: Math.max(320, editorScrollView.height - (editorContent.y + y + 28))
-                            radius: root.shapeLarge
-                            color: Qt.rgba(root.md3OnSurface.r, root.md3OnSurface.g, root.md3OnSurface.b, 0.03)
-                            border.width: 1
-                            border.color: root.md3OutlineVariant
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "正在调整大小"
-                                font.pixelSize: 14
-                                color: root.md3OnSurfaceVariant
-                            }
-                        }
                         }
                     }
                 }
