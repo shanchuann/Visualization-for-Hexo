@@ -71,16 +71,16 @@ $env:ZHIPUAI_API_KEY = "你的 API Key"
 - 调试构建脚本：`Visualization for Hexo/scripts/build.ps1`
 - 发布构建/打包入口：`Visualization for Hexo/scripts/package.ps1`
 
-调试构建示例：
+调试构建示例(把路径换成你本机 Qt 6.9.3 安装目录)：
 
 ```powershell
-& ".\Visualization for Hexo\scripts\build.ps1" -Configuration Debug -Platform x64 -Clean
+& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Debug -QtInstall "D:\Qt\6.9.3\msvc2022_64"
 ```
 
 发布构建示例：
 
 ```powershell
-& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Release -Platform x64 -Toolset v143 -Clean
+& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Release -QtInstall "D:\Qt\6.9.3\msvc2022_64"
 ```
 
 常用参数：
@@ -92,12 +92,16 @@ $env:ZHIPUAI_API_KEY = "你的 API Key"
 - `-IncludePdb` 将 PDB 复制进包
 - `-SkipKill` 跳过停止正在运行的应用
 
-说明：`package.ps1` 会完成 Release 编译、`windeployqt` 依赖收集，并输出可分发 zip 包，同时拷贝 README 和 LICENSE。
+说明：
+
+- `package.ps1` 会完成 Release 编译、`windeployqt` 依赖收集，并输出可分发 zip 包，同时拷贝 README 和 LICENSE。
+- Debug 打包需要对应版本的 Qt Debug DLL（`Qt6* d.dll`），建议用 `-QtInstall` 或设置 `QT_ROOT_DIR` 来保证依赖版本一致。
 
 ## CI/CD
 
 - Push 到 `main` 会执行 cppcheck 静态检查并生成 Windows 打包产物
 - Push `v*` tag 或手动触发工作流时，会发布 GitHub Release（tag 发布为正式版本，手动触发为预发布）
+- GitHub Actions 使用 `install-qt-action` 并缓存 Qt，打包时会自动解析 `QT_ROOT_DIR` 以确保 `windeployqt` 版本匹配
 
 ## 目录结构
 

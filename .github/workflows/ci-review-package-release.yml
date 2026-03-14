@@ -8,8 +8,17 @@ on:
       - "v*"
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
-  contents: write
+  contents: read
+
+env:
+  QT_VERSION: "6.9.3"
+  QT_ARCH: "win64_msvc2022_64"
 
 jobs:
   review:
@@ -43,9 +52,18 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.9.3"
-          arch: "win64_msvc2022_64"
+          version: ${{ env.QT_VERSION }}
+          arch: ${{ env.QT_ARCH }}
           modules: "qtwebengine qtwebchannel qtpositioning"
+          cache: true
+
+      - name: Resolve Qt root
+        shell: pwsh
+        run: |
+          if ($env:Qt6_DIR) {
+            $qtRoot = Resolve-Path (Join-Path $env:Qt6_DIR "..\\..\\..")
+            "QT_ROOT_DIR=$qtRoot" >> $env:GITHUB_ENV
+          }
 
       - name: Package app
         shell: pwsh
@@ -58,12 +76,15 @@ jobs:
           name: Visualization-for-Hexo-Release-x64
           path: Visualization for Hexo/dist/Visualization-for-Hexo-Release-x64.zip
           if-no-files-found: error
+          retention-days: 14
 
   release:
     name: Publish Release
     runs-on: windows-latest
     needs: package
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
     steps:
       - name: Download package artifact
         uses: actions/download-artifact@v4

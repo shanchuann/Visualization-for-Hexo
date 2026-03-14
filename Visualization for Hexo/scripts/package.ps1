@@ -74,17 +74,17 @@ function Find-WinDeployQt {
         return $env:WINDEPLOYQT_EXE
     }
 
-    $cmd = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
-    if ($cmd) {
-        return $cmd.Source
-    }
-
     $qtInstallDir = Resolve-QtInstallDir
     if ($qtInstallDir) {
         $candidate = Join-Path $qtInstallDir "bin\windeployqt.exe"
         if (Test-Path $candidate) {
             return $candidate
         }
+    }
+
+    $cmd = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return $cmd.Source
     }
 
     $qmake = Get-Command qmake.exe -ErrorAction SilentlyContinue
@@ -154,9 +154,9 @@ if ($IncludePdb) {
 }
 
 $docs = @(
-    Join-Path $repoRoot "README.md",
-    Join-Path $repoRoot "LICENSE",
-    Join-Path $repoRoot "LICENSE.txt"
+    (Join-Path $repoRoot "README.md")
+    (Join-Path $repoRoot "LICENSE")
+    (Join-Path $repoRoot "LICENSE.txt")
 ) | Where-Object { Test-Path $_ } | Select-Object -Unique
 
 foreach ($doc in $docs) {
@@ -166,7 +166,8 @@ foreach ($doc in $docs) {
 $windeployqt = Find-WinDeployQt
 Write-Host "[package] windeployqt: $windeployqt"
 
-& $windeployqt --release --qmldir $root (Join-Path $packageDir "Visualization for Hexo.exe")
+$deployMode = if ($Configuration -match "Debug") { "--debug" } else { "--release" }
+& $windeployqt $deployMode --qmldir $root (Join-Path $packageDir "Visualization for Hexo.exe")
 if ($LASTEXITCODE -ne 0) {
     throw "windeployqt failed with exit code $LASTEXITCODE"
 }
