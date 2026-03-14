@@ -179,10 +179,10 @@ int main(int argc, char *argv[])
         filter->hwnd = hwnd;
         qApp->installNativeEventFilter(filter);
 
+        filter->applyRoundedCorners(true);
         SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
                      SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
 
-        filter->applyRoundedCorners(true);
         window->setProperty("visible", true);
     }
 #endif

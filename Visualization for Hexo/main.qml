@@ -24,7 +24,7 @@ ApplicationWindow {
     }
 
     id: root
-    visible: true
+    visible: false
     width: 1100
     height: 700
     x: Screen.width / 2 - width / 2
@@ -97,7 +97,7 @@ ApplicationWindow {
     property bool splitDragDegrade: false
     property bool resizeDegrade: false
     property bool suppressResizeDegrade: false
-    readonly property bool degradeRendering: false
+    readonly property bool degradeRendering: resizeDegrade || splitDragDegrade
     readonly property int topBarButtonSize: 26
     readonly property int fixedSidebarWidth: 370
     readonly property int consoleCollapsedHeight: 90
@@ -210,6 +210,20 @@ ApplicationWindow {
         if (editorContent && editorContent.isMarkdown) {
             previewRenderTimer.restart()
         }
+    }
+
+    function editorBodyHeight() {
+        if (root.degradeRendering) {
+            return 320
+        }
+
+        var previewHeight = mdPreview.implicitHeight
+        if (coverPreview.visible) {
+            previewHeight += coverPreview.height + 10
+        }
+
+        var contentHeight = editorContent.isMarkdown ? previewHeight : bodyEdit.contentHeight
+        return Math.max(contentHeight, 240)
     }
 
     function rememberNormalWindowGeometry() {
@@ -971,7 +985,7 @@ ApplicationWindow {
 
     Timer {
         id: resizeSettleTimer
-        interval: 24
+        interval: 120
         repeat: false
         onTriggered: root.resizeDegrade = false
     }
@@ -1487,7 +1501,7 @@ ApplicationWindow {
                             property bool isMarkdown: true
                             property real computedWidth: Math.max(400, Math.min(980, editorScrollView.width - 72))
                             property real quantizedWidth: Math.max(400, Math.min(980, Math.round(computedWidth / 24) * 24))
-                            width: computedWidth
+                            width: root.resizeDegrade ? quantizedWidth : computedWidth
                             x: Math.max(24, (editorScrollView.width - width) / 2)
                             y: 32
                             spacing: 20
@@ -1636,12 +1650,7 @@ ApplicationWindow {
                         StackLayout {
                             visible: !root.degradeRendering
                             width: parent.width
-                            height: Math.max(
-                                editorContent.isMarkdown
-                                    ? (mdPreview.implicitHeight + (coverPreview.visible ? (coverPreview.height + 10) : 0))
-                                    : bodyEdit.contentHeight,
-                                240
-                            )
+                            height: root.editorBodyHeight()
                             currentIndex: editorContent.isMarkdown ? 1 : 0
 
                             TextEdit {
@@ -1711,7 +1720,7 @@ ApplicationWindow {
 
                             Text {
                                 anchors.centerIn: parent
-                                text: "正在调整侧边栏大小"
+                                text: "正在调整大小"
                                 font.pixelSize: 14
                                 color: root.md3OnSurfaceVariant
                             }
