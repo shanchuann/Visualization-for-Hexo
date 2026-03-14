@@ -12,9 +12,33 @@
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "user32.lib")
 
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+
+#ifndef DWMWCP_DEFAULT
+#define DWMWCP_DEFAULT 0
+#define DWMWCP_DONOTROUND 1
+#define DWMWCP_ROUND 2
+#define DWMWCP_ROUNDSMALL 3
+#endif
+
 class WinFramelessFilter : public QAbstractNativeEventFilter {
 public:
     HWND hwnd = nullptr;
+
+    void applyRoundedCorners(bool enable) {
+        if (!hwnd) {
+            return;
+        }
+
+        const int preference = enable ? DWMWCP_ROUND : DWMWCP_DONOTROUND;
+        DwmSetWindowAttribute(hwnd,
+                              DWMWA_WINDOW_CORNER_PREFERENCE,
+                              &preference,
+                              sizeof(preference));
+    }
+
     bool nativeEventFilter(const QByteArray &eventType, void *message, qintptr *result) override {
         Q_UNUSED(eventType);
         MSG *msg = static_cast<MSG *>(message);
@@ -99,6 +123,14 @@ public:
                 
                 return false;
             }
+
+            if (msg->message == WM_SIZE) {
+                if (msg->wParam == SIZE_MAXIMIZED) {
+                    applyRoundedCorners(false);
+                } else if (msg->wParam == SIZE_RESTORED) {
+                    applyRoundedCorners(true);
+                }
+            }
         }
         return false;
     }
@@ -150,6 +182,7 @@ int main(int argc, char *argv[])
         SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
                      SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
 
+        filter->applyRoundedCorners(true);
         window->setProperty("visible", true);
     }
 #endif

@@ -25,8 +25,8 @@ ApplicationWindow {
 
     id: root
     visible: true
-    width: 1280
-    height: 800
+    width: 1100
+    height: 700
     x: Screen.width / 2 - width / 2
     y: Screen.height / 2 - height / 2
     minimumWidth: 1100
