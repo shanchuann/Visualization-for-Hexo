@@ -94,10 +94,9 @@ ApplicationWindow {
     property bool consoleVisible: false
     property int settingsTabIndex: 0
     property int articleViewMode: 1 // 0: source, 1: preview
-    property bool splitDragDegrade: false
     property bool resizeDegrade: false
     property bool suppressResizeDegrade: false
-    readonly property bool degradeRendering: resizeDegrade || splitDragDegrade
+    readonly property bool degradeRendering: false
     readonly property int topBarButtonSize: 26
     readonly property int fixedSidebarWidth: 370
     readonly property int consoleCollapsedHeight: 90
@@ -120,8 +119,6 @@ ApplicationWindow {
     property real normalWindowY: 0
     property real normalWindowWidth: width
     property real normalWindowHeight: height
-    property real cachedEditorContentWidth: 0
-    property real cachedEditorBodyHeight: 0
     readonly property int edgeSnapThreshold: 18
     readonly property string iconBase: "qrc:/qt/qml/visualization for hexo/assets/iconpark/"
     readonly property bool isWindowMaximized: root.visibility === Window.Maximized || ((root.windowState & Qt.WindowMaximized) !== 0)
@@ -131,16 +128,6 @@ ApplicationWindow {
         if (consoleVisible && consoleRect) {
             consoleRect.expanded = true
         }
-        Qt.callLater(function() {
-            if (centerContentSplit) {
-                centerContentSplit.forceLayout()
-            }
-        })
-        Qt.callLater(function() {
-            if (centerContentSplit) {
-                centerContentSplit.forceLayout()
-            }
-        })
     }
 
     onArticleViewModeChanged: {
@@ -166,10 +153,6 @@ ApplicationWindow {
     }
 
     onResizeDegradeChanged: {
-            // Keep hook for future adaptive tuning.
-    }
-
-    onSplitDragDegradeChanged: {
             // Keep hook for future adaptive tuning.
     }
 
@@ -203,9 +186,6 @@ ApplicationWindow {
         if (mainContentSplit) {
             mainContentSplit.forceLayout()
         }
-        if (centerContentSplit) {
-            centerContentSplit.forceLayout()
-        }
         if (editorScrollView) {
             editorScrollView.returnToBounds()
         }
@@ -214,11 +194,11 @@ ApplicationWindow {
         }
     }
 
-    function computeEditorContentWidth() {
+    function editorContentWidth() {
         return Math.max(400, Math.min(980, editorScrollView.width - 72))
     }
 
-    function computeEditorBodyHeight() {
+    function editorBodyHeight() {
         var previewHeight = mdPreview.implicitHeight
         if (coverPreview.visible) {
             previewHeight += coverPreview.height + 10
@@ -226,26 +206,6 @@ ApplicationWindow {
 
         var contentHeight = editorContent.isMarkdown ? previewHeight : bodyEdit.contentHeight
         return Math.max(contentHeight, 240)
-    }
-
-    function editorContentWidth() {
-        if (root.degradeRendering && root.cachedEditorContentWidth > 0) {
-            return root.cachedEditorContentWidth
-        }
-
-        var nextWidth = computeEditorContentWidth()
-        root.cachedEditorContentWidth = nextWidth
-        return nextWidth
-    }
-
-    function editorBodyHeight() {
-        if (root.degradeRendering && root.cachedEditorBodyHeight > 0) {
-            return root.cachedEditorBodyHeight
-        }
-
-        var nextHeight = computeEditorBodyHeight()
-        root.cachedEditorBodyHeight = nextHeight
-        return nextHeight
     }
 
     function restoreNormalGeometry() {
@@ -1474,56 +1434,21 @@ ApplicationWindow {
             }
         }
 
-        // ==================== Center Area (Editor + Console) ====================
-        SplitView {
-            id: centerContentSplit
+        // ==================== Center Area (Editor + Console Overlay) ====================
+        Item {
+            id: centerContentPane
             SplitView.fillWidth: true
             SplitView.fillHeight: true
-            orientation: Qt.Vertical
-
-            handle: Item {
-                id: centerSplitHandle
-                visible: root.consoleVisible
-                implicitHeight: root.consoleVisible ? 16 : 0
-                // Make the drag handle obvious and easy to grab.
-                Rectangle {
-                    anchors.fill: parent
-                    color: Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, SplitHandle.pressed ? 0.16 : 0.08)
-                }
-                Rectangle {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Math.min(parent.width - 20, 180)
-                    height: SplitHandle.pressed ? 6 : (SplitHandle.hovered ? 5 : 4)
-                    radius: 2
-                    color: SplitHandle.pressed ? root.md3Primary
-                         : (SplitHandle.hovered ? root.md3Primary : root.md3OutlineVariant)
-                    opacity: SplitHandle.hovered || SplitHandle.pressed ? 1.0 : 0.82
-                }
-                // Cursor hint
-                HoverHandler { cursorShape: Qt.SplitVCursor }
-                SplitHandle.onPressedChanged: {
-                    if (!root.consoleVisible) {
-                        return
-                    }
-                    root.splitDragDegrade = SplitHandle.pressed
-                }
-            }
 
             // ---- Editor Area ----
             Rectangle {
-                SplitView.fillWidth: true
-                SplitView.fillHeight: true
+                anchors.fill: parent
                 color: root.layoutBg
 
                 Item {
                     id: editorViewport
                     anchors.fill: parent
                     clip: true
-                    layer.enabled: root.degradeRendering
-                    layer.smooth: true
-                    layer.mipmap: true
-                    layer.live: !root.degradeRendering
 
                     Flickable {
                         id: editorScrollView
@@ -1788,19 +1713,16 @@ ApplicationWindow {
             Rectangle {
                 id: consoleRect
                 visible: root.consoleVisible
-                SplitView.fillWidth: true
-                SplitView.preferredHeight: root.consoleVisible ? (expanded ? 200 : root.consoleCollapsedHeight) : 0
-                SplitView.minimumHeight: root.consoleVisible ? root.consoleCollapsedHeight : 0
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: root.consoleVisible ? (expanded ? 240 : root.consoleCollapsedHeight) : 0
                 color: root.md3InverseSurface
+                z: 5
+                clip: true
 
                 property bool expanded: false
-                onHeightChanged: {
-                    if (height <= root.consoleCollapsedHeight + 2 && expanded) {
-                        expanded = false;
-                    } else if (height > root.consoleCollapsedHeight + 20 && !expanded) {
-                        expanded = true;
-                    }
-                }
+                Behavior on height { NumberAnimation { duration: 140 } }
 
                 Rectangle {
                     id: consoleHeader
@@ -2278,7 +2200,7 @@ ApplicationWindow {
                                             text: "添加/切换"
                                                 Layout.preferredWidth: 120
                                             tone: "filled"
-                                            onClicked: root.addOrInitializeProject(projPathInput.text)
+                                            onClicked: projectFolderDialog.open()
                                         }
                                     }
 
@@ -2967,10 +2889,12 @@ ApplicationWindow {
     Dialog {
         id: initProjectDialog
         modal: true
-        title: "初始化 Hexo 项目"
-        standardButtons: Dialog.Ok | Dialog.Cancel
         anchors.centerIn: Overlay.overlay
-        onAccepted: {
+        title: ""
+        standardButtons: Dialog.NoButton
+        padding: 0
+
+        function confirmInit() {
             if (appContext.initializeHexoProject(root.pendingInitProjectPath)) {
                 root.envStatus = appContext.environmentCheck();
                 root.envStatusVisible = true;
@@ -2982,24 +2906,139 @@ ApplicationWindow {
             }
         }
 
-        contentItem: Column {
-            width: 420
-            spacing: 10
+        background: Rectangle {
+            radius: root.shapeLarge
+            color: root.md3SurfaceContainerLowest
+            border.width: 1
+            border.color: root.md3OutlineVariant
+        }
 
-            Text {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                color: root.md3OnSurface
-                text: "检测到该目录不是 Hexo 项目。是否执行初始化（hexo init）并自动切换到该项目？"
-            }
+        contentItem: Item {
+            width: 460
+            height: dialogCol.implicitHeight + 32
 
-            Text {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                color: root.md3OnSurfaceVariant
-                text: "目录: " + root.pendingInitProjectPath + "\n初始化成功后会自动启动预览服务。"
-                font.pixelSize: 12
+            ColumnLayout {
+                id: dialogCol
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 16
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+
+                    Rectangle {
+                        width: 40
+                        height: 40
+                        radius: 20
+                        color: root.md3PrimaryContainer
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "!"
+                            font.pixelSize: 18
+                            font.weight: Font.DemiBold
+                            color: root.md3Primary
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+
+                        Text {
+                            text: "初始化 Hexo 项目"
+                            font.pixelSize: 16
+                            font.weight: Font.DemiBold
+                            color: root.md3OnSurface
+                        }
+                        Text {
+                            text: "检测到该目录不是 Hexo 项目，是否执行初始化并切换？"
+                            color: root.md3OnSurfaceVariant
+                            font.pixelSize: 13
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+
+                UiCard {
+                    Layout.fillWidth: true
+                    color: root.md3SurfaceContainer
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 6
+
+                        Text {
+                            text: "目录"
+                            color: root.md3OnSurfaceVariant
+                            font.pixelSize: 12
+                        }
+                        Text {
+                            text: root.pendingInitProjectPath
+                            color: root.md3OnSurface
+                            font.pixelSize: 13
+                            elide: Text.ElideMiddle
+                            wrapMode: Text.WrapAnywhere
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: "初始化成功后会自动启动预览，并打开浏览器。"
+                            color: root.md3OnSurfaceVariant
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    Item { Layout.fillWidth: true }
+                    UiButton {
+                        text: "取消"
+                        tone: "outlined"
+                        onClicked: initProjectDialog.close()
+                    }
+                    UiButton {
+                        text: "初始化并切换"
+                        tone: "filled"
+                        onClicked: {
+                            initProjectDialog.close()
+                            initProjectDialog.confirmInit()
+                        }
+                    }
+                }
             }
+        }
+    }
+
+    FileDialog {
+        id: projectFolderDialog
+        title: "选择 Hexo 项目目录"
+        fileMode: FileDialog.Directory
+        onOpened: {
+            var path = (projPathInput && projPathInput.text) ? projPathInput.text.trim() : ""
+            if (path.length === 0) {
+                return
+            }
+            var normalized = path.replace(/\\/g, "/")
+            if (!normalized.startsWith("file:/")) {
+                normalized = "file:///" + normalized
+            }
+            projectFolderDialog.currentFolder = normalized
+        }
+        onAccepted: {
+            var selected = selectedFile ? selectedFile.toLocalFile() : ""
+            if (!selected || selected.length === 0) {
+                return
+            }
+            projPathInput.text = selected
+            root.addOrInitializeProject(selected)
         }
     }
 

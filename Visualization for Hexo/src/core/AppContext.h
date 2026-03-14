@@ -180,6 +180,8 @@ private:
     void saveLastOpenedPostState() const;
     QString restoreLastOpenedPostPath() const;
     void appendLog(const QString &line);
+    void handlePreviewOutput(const QString &text);
+    void resetPreviewOpenState(const QString &commandLine);
 
     void runCommand(const QString &commandLine, bool silentIfBusy = false);
     void setupWatcher();
@@ -227,4 +229,7 @@ private:
     QString m_aiApiBase;
     QString m_aiModel;
     bool m_firstRun = true;
+    bool m_pendingPreviewOpen = false;
+    bool m_previewOpened = false;
+    QString m_lastPreviewUrl;
 };

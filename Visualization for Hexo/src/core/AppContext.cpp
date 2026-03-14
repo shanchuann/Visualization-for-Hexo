@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QDesktopServices>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
@@ -205,14 +206,18 @@ AppContext::AppContext(QObject *parent)
         m_taskRunning = true;
         emit taskRunningChanged();
         appendLog(QString("$ %1").arg(cmd));
+        resetPreviewOpenState(cmd);
     });
     connect(m_command, &CommandAdapter::outputReady, this, [this](const QString &text) {
         appendLog(text);
+        handlePreviewOutput(text);
     });
     connect(m_command, &CommandAdapter::commandFinished, this, [this](int exitCode, bool crashed) {
         m_taskRunning = false;
         emit taskRunningChanged();
         appendLog(QString("[task finished] exit=%1 crashed=%2").arg(exitCode).arg(crashed ? "true" : "false"));
+        m_pendingPreviewOpen = false;
+        m_previewOpened = false;
     });
 
     loadProjectsFromDisk();
@@ -1315,6 +1320,48 @@ void AppContext::appendLog(const QString &line)
         m_logText = m_logText.right(200000);
     }
     emit logTextChanged();
+}
+
+void AppContext::resetPreviewOpenState(const QString &commandLine)
+{
+    static const QRegularExpression hexoServerRe(R"(\bhexo\s+server\b)", QRegularExpression::CaseInsensitiveOption);
+    if (hexoServerRe.match(commandLine).hasMatch()) {
+        m_pendingPreviewOpen = true;
+        m_previewOpened = false;
+        m_lastPreviewUrl.clear();
+        return;
+    }
+
+    m_pendingPreviewOpen = false;
+    m_previewOpened = false;
+}
+
+void AppContext::handlePreviewOutput(const QString &text)
+{
+    if (!m_pendingPreviewOpen || m_previewOpened) {
+        return;
+    }
+
+    static const QRegularExpression urlRe(R"(https?://[^\s]+)");
+    const QRegularExpressionMatch match = urlRe.match(text);
+    if (!match.hasMatch()) {
+        return;
+    }
+
+    QString url = match.captured(0).trimmed();
+    while (url.endsWith('.') || url.endsWith(',') || url.endsWith(')')) {
+        url.chop(1);
+    }
+
+    if (url.isEmpty()) {
+        return;
+    }
+
+    m_lastPreviewUrl = url;
+    m_previewOpened = true;
+    m_pendingPreviewOpen = false;
+    QDesktopServices::openUrl(QUrl(url));
+    appendStructuredLog("info", "PREVIEW_OPEN", QString("opened preview %1").arg(url));
 }
 
 void AppContext::runCommand(const QString &commandLine, bool silentIfBusy)
