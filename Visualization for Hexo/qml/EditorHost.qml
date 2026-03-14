@@ -1,7 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-import QtWebEngine 1.10
-import QtWebChannel 1.15
+import QtWebEngine
+import QtWebChannel
 
 Item {
     id: root

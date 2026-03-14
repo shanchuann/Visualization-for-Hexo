@@ -4,6 +4,13 @@
 #include <QWindow>
 #include <QAbstractNativeEventFilter>
 #include <QIcon>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QTextStream>
+#include <QQmlError>
+#include <QQuickWindow>
+#include <QColor>
 
 #ifdef Q_OS_WIN
 #include <Windows.h>
@@ -26,6 +33,9 @@
 class WinFramelessFilter : public QAbstractNativeEventFilter {
 public:
     HWND hwnd = nullptr;
+    bool roundedEnabled = true;
+    int minWidth = 0;
+    int minHeight = 0;
 
     void applyRoundedCorners(bool enable) {
         if (!hwnd) {
@@ -39,29 +49,41 @@ public:
                               sizeof(preference));
     }
 
+    void updateRoundedCorners(bool enable) {
+        if (roundedEnabled == enable) {
+            return;
+        }
+        roundedEnabled = enable;
+        applyRoundedCorners(enable);
+    }
+
     bool nativeEventFilter(const QByteArray &eventType, void *message, qintptr *result) override {
         Q_UNUSED(eventType);
         MSG *msg = static_cast<MSG *>(message);
         if (msg->hwnd && msg->hwnd == hwnd) {
-            if (msg->message == WM_NCCALCSIZE && msg->wParam == TRUE) {
-                NCCALCSIZE_PARAMS *params = reinterpret_cast<NCCALCSIZE_PARAMS *>(msg->lParam);
-                
-                // 不调用 DefWindowProc，直接修改当前的新窗口矩形（原本的 rgrc[0] 就是新窗口矩形）
-                // 默认将等于整个窗口的尺寸
-                if (IsZoomed(msg->hwnd)) {
-                    HMONITOR hMonitor = MonitorFromWindow(msg->hwnd, MONITOR_DEFAULTTONEAREST);
-                    if (hMonitor) {
-                        MONITORINFO mi;
-                        mi.cbSize = sizeof(MONITORINFO);
-                        GetMonitorInfo(hMonitor, &mi);
-                        params->rgrc[0] = mi.rcWork;
-                    }
+            if (msg->message == WM_GETMINMAXINFO) {
+                MINMAXINFO *mmi = reinterpret_cast<MINMAXINFO *>(msg->lParam);
+                HMONITOR hMonitor = MonitorFromWindow(msg->hwnd, MONITOR_DEFAULTTONEAREST);
+                if (hMonitor) {
+                    MONITORINFO mi;
+                    mi.cbSize = sizeof(MONITORINFO);
+                    GetMonitorInfo(hMonitor, &mi);
+                    RECT work = mi.rcWork;
+                    RECT monitor = mi.rcMonitor;
+                    mmi->ptMaxPosition.x = work.left - monitor.left;
+                    mmi->ptMaxPosition.y = work.top - monitor.top;
+                    mmi->ptMaxSize.x = work.right - work.left;
+                    mmi->ptMaxSize.y = work.bottom - work.top;
                 }
-                
+                if (minWidth > 0 && minHeight > 0) {
+                    UINT dpi = GetDpiForWindow(msg->hwnd);
+                    mmi->ptMinTrackSize.x = MulDiv(minWidth, dpi, 96);
+                    mmi->ptMinTrackSize.y = MulDiv(minHeight, dpi, 96);
+                }
                 *result = 0;
                 return true;
             }
-            
+
             if (msg->message == WM_NCHITTEST) {
                 long x = GET_X_LPARAM(msg->lParam);
                 long y = GET_Y_LPARAM(msg->lParam);
@@ -126,9 +148,9 @@ public:
 
             if (msg->message == WM_SIZE) {
                 if (msg->wParam == SIZE_MAXIMIZED) {
-                    applyRoundedCorners(false);
+                    updateRoundedCorners(false);
                 } else if (msg->wParam == SIZE_RESTORED) {
-                    applyRoundedCorners(true);
+                    updateRoundedCorners(true);
                 }
             }
         }
@@ -141,6 +163,24 @@ public:
 #include "src/core/AppContext.h"
 #include "src/core/EditorBridge.h"
 
+static void WriteStartupLog(const QStringList &lines)
+{
+    if (lines.isEmpty()) {
+        return;
+    }
+
+    const QString logPath = QDir(QCoreApplication::applicationDirPath()).filePath("startup.log");
+    QFile file(logPath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        return;
+    }
+
+    QTextStream out(&file);
+    for (const auto &line : lines) {
+        out << line << "\n";
+    }
+}
+
 int main(int argc, char *argv[])
 {
 #if defined(Q_OS_WIN) && QT_VERSION_CHECK(5, 6, 0) <= QT_VERSION && QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
@@ -148,6 +188,8 @@ int main(int argc, char *argv[])
 #endif
 
     qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
+    qputenv("QSG_RENDER_LOOP", "threaded");
+    qputenv("QSG_RHI_BACKEND", "direct3d11");
 
     QGuiApplication app(argc, argv);
     app.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/visualization for hexo/assets/app-icon.png")));
@@ -155,6 +197,7 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     AppContext appContext;
     EditorBridge editorBridge;
+    QStringList qmlWarnings;
 
     QObject::connect(&editorBridge, &EditorBridge::saveRequested, &appContext, [&appContext]() {
         appContext.appendStructuredLog("info", "EDITOR_BRIDGE", "save requested from web editor");
@@ -162,21 +205,40 @@ int main(int argc, char *argv[])
 
     engine.rootContext()->setContextProperty("appContext", &appContext);
     engine.rootContext()->setContextProperty("editorBridge", &editorBridge);
+    engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");
+    QObject::connect(&engine, &QQmlEngine::warnings, &engine, [&qmlWarnings](const QList<QQmlError> &warnings) {
+        for (const auto &warning : warnings) {
+            qmlWarnings << warning.toString();
+        }
+    });
     engine.load(QUrl(QStringLiteral("qrc:/qt/qml/visualization for hexo/main.qml")));
-    if (engine.rootObjects().isEmpty())
+    if (engine.rootObjects().isEmpty()) {
+        WriteStartupLog(qmlWarnings);
+#ifdef Q_OS_WIN
+        const QString details = qmlWarnings.isEmpty() ? QStringLiteral("Unknown QML load error.") : qmlWarnings.join("\n");
+        const QString message = QStringLiteral("Failed to load UI.\n\n") + details +
+                                QStringLiteral("\n\nA startup.log file has been written next to the executable.");
+        MessageBoxW(nullptr, reinterpret_cast<LPCWSTR>(message.utf16()),
+                    L"Visualization for Hexo", MB_OK | MB_ICONERROR);
+#endif
         return -1;
+    }
 
 #ifdef Q_OS_WIN
     QWindow *window = qobject_cast<QWindow *>(engine.rootObjects().constFirst());
     if (window) {
-        HWND hwnd = reinterpret_cast<HWND>(window->winId());
+        if (auto *quickWindow = qobject_cast<QQuickWindow *>(window)) {
+            quickWindow->setPersistentSceneGraph(true);
+            quickWindow->setColor(QColor(0xFF, 0xFF, 0xFF));
+        }
 
-        // 扩展 DWM 边界，保留原生阴影并且骗过系统这是正常窗口
-        MARGINS margins = {1, 1, 1, 1};
-        DwmExtendFrameIntoClientArea(hwnd, &margins);
+        HWND hwnd = reinterpret_cast<HWND>(window->winId());
 
         WinFramelessFilter *filter = new WinFramelessFilter();
         filter->hwnd = hwnd;
+        const QSize minSize = window->minimumSize();
+        filter->minWidth = minSize.width() > 0 ? minSize.width() : 1100;
+        filter->minHeight = minSize.height() > 0 ? minSize.height() : 700;
         qApp->installNativeEventFilter(filter);
 
         filter->applyRoundedCorners(true);

@@ -140,9 +140,13 @@ $packageDir = Join-Path $distRoot "Visualization-for-Hexo-$Configuration-$Platfo
 $zipPath = Join-Path $distRoot "Visualization-for-Hexo-$Configuration-$Platform.zip"
 
 if (Test-Path $packageDir) {
-    Remove-Item -Recurse -Force $packageDir
+    try {
+        Remove-Item -Recurse -Force $packageDir
+    } catch {
+        Write-Warning "[package] failed to remove existing package dir (in use). Will overwrite files in-place: $packageDir"
+    }
 }
-New-Item -ItemType Directory -Path $packageDir | Out-Null
+New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
 
 Copy-Item -Path $exe -Destination (Join-Path $packageDir "Visualization for Hexo.exe") -Force
 

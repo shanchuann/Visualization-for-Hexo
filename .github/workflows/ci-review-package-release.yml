@@ -19,11 +19,17 @@ permissions:
 env:
   QT_VERSION: "6.9.3"
   QT_ARCH: "win64_msvc2022_64"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   review:
     name: Static Review (cppcheck)
     runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'feat')) ||
+      (github.event_name == 'pull_request' && startsWith(github.event.pull_request.title, 'feat'))
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,7 +47,13 @@ jobs:
     name: Build and Package (Windows)
     runs-on: windows-latest
     needs: review
-    if: github.event_name != 'pull_request'
+    if: |
+      github.event_name != 'pull_request' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        startsWith(github.ref, 'refs/tags/v') ||
+        (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'feat'))
+      )
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -82,7 +94,13 @@ jobs:
     name: Publish Release
     runs-on: windows-latest
     needs: package
-    if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    if: |
+      github.event_name != 'pull_request' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        startsWith(github.ref, 'refs/tags/v') ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'feat'))
+      )
     permissions:
       contents: write
     steps:

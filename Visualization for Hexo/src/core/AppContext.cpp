@@ -26,6 +26,8 @@
 #include <QSet>
 #include <QTextDocument>
 #include <QTextStream>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrent>
 
 namespace {
 QString sanitizeConsoleChunk(const QString &raw)
@@ -39,6 +41,62 @@ QString sanitizeConsoleChunk(const QString &raw)
     out.replace("\r\n", "\n");
     out.replace('\r', '\n');
     return out;
+}
+
+QString buildPreviewHtml(const QString &markdown, int bodyFontPx, qreal lineSpacing)
+{
+    if (markdown.trimmed().isEmpty()) {
+        return QString();
+    }
+
+    const int safeBodyFont = qBound(12, bodyFontPx, 36);
+    const qreal safeLineSpacing = qBound(1.2, lineSpacing, 2.6);
+    const QString bodyFontCss = QString::number(safeBodyFont);
+    const QString lineHeightCss = QString::number(safeLineSpacing, 'f', 2);
+
+    QTextDocument doc;
+    QFont defaultPreviewFont;
+    defaultPreviewFont.setFamilies({"PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", "SimSun"});
+    defaultPreviewFont.setPixelSize(safeBodyFont);
+    doc.setDefaultFont(defaultPreviewFont);
+    doc.setMarkdown(markdown);
+    QString html = doc.toHtml();
+
+    // Qt-generated HTML may carry inline pt sizes that override CSS body size.
+    static const QRegularExpression inlinePtFontRe("font-size\\s*:\\s*[0-9]+(?:\\.[0-9]+)?pt\\s*;");
+    html.replace(inlinePtFontRe, QString("font-size:%1px;").arg(bodyFontCss));
+
+    const QString previewStyle = QStringLiteral(
+        "<style>"
+        "body{font-family:'PingFang SC','Microsoft YaHei UI','Noto Sans CJK SC','SimSun',sans-serif;"
+        "font-size:%1px;line-height:%2;color:#2B261B;letter-spacing:0.01em;}"
+        "p,ul,ol,li,td,th{font-size:1em;line-height:%2;margin:0 0 16px 0;}"
+        "h1,h2,h3,h4,h5,h6{font-weight:700;line-height:1.35;color:#1F2A44;margin:26px 0 14px 0;}"
+        "h1{font-size:1.95em;}"
+        "h2{font-size:1.58em;}"
+        "h3{font-size:1.34em;}"
+        "h4{font-size:1.18em;}"
+        "a{color:#1B6EF3;text-decoration:none;}"
+        "a:hover{text-decoration:underline;}"
+        "img{display:block;margin:12px auto 14px auto;max-width:100%;max-height:340px;height:auto;object-fit:contain;border-radius:6px;}"
+        "pre{margin:14px 0;padding:12px 14px;border-radius:8px;background:#F5F7FC;border:1px solid #E1E6F2;overflow:auto;}"
+        "code{font-family:'Cascadia Mono','Consolas','Courier New',monospace;font-size:1.08em;}"
+        "pre code{font-size:0.97em;line-height:1.7;color:#1E2A44;background:transparent;}"
+        "blockquote{margin:14px 0;padding:10px 14px;border-left:4px solid #B8C2D9;background:#F4F7FF;color:#3A4152;}"
+        "blockquote p{margin:0 0 8px 0;}"
+        "blockquote p:last-child{margin-bottom:0;}"
+        "</style>")
+        .arg(bodyFontCss, lineHeightCss);
+
+    const QString headCloseTag = QStringLiteral("</head>");
+    const int headCloseIndex = html.indexOf(headCloseTag, Qt::CaseInsensitive);
+    if (headCloseIndex >= 0) {
+        html.insert(headCloseIndex, previewStyle);
+    } else {
+        html.prepend(previewStyle);
+    }
+
+    return html;
 }
 
 QString patchSimpleYamlPreserveLayout(const QString &original, const QVariantMap &updates)
@@ -284,58 +342,30 @@ QString AppContext::renderMarkdownForPreview(const QString &markdown,
                                              int bodyFontPx,
                                              qreal lineSpacing) const
 {
-    if (markdown.trimmed().isEmpty()) {
-        return QString();
+    return buildPreviewHtml(markdown, bodyFontPx, lineSpacing);
+}
+
+void AppContext::renderMarkdownForPreviewAsync(const QString &markdown,
+                                               int bodyFontPx,
+                                               qreal lineSpacing,
+                                               int requestId)
+{
+    const QString trimmed = markdown.trimmed();
+    if (trimmed.isEmpty()) {
+        emit previewMarkdownReady(QString(), requestId);
+        return;
     }
 
-    const int safeBodyFont = qBound(12, bodyFontPx, 36);
-    const qreal safeLineSpacing = qBound(1.2, lineSpacing, 2.6);
-    const QString bodyFontCss = QString::number(safeBodyFont);
-    const QString lineHeightCss = QString::number(safeLineSpacing, 'f', 2);
+    auto *watcher = new QFutureWatcher<QString>(this);
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, requestId]() {
+        const QString html = watcher->future().result();
+        watcher->deleteLater();
+        emit previewMarkdownReady(html, requestId);
+    });
 
-    QTextDocument doc;
-    QFont defaultPreviewFont;
-    defaultPreviewFont.setFamilies({"PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", "SimSun"});
-    defaultPreviewFont.setPixelSize(safeBodyFont);
-    doc.setDefaultFont(defaultPreviewFont);
-    doc.setMarkdown(markdown);
-    QString html = doc.toHtml();
-
-    // Qt-generated HTML may carry inline pt sizes that override CSS body size.
-    static const QRegularExpression inlinePtFontRe("font-size\\s*:\\s*[0-9]+(?:\\.[0-9]+)?pt\\s*;");
-    html.replace(inlinePtFontRe, QString("font-size:%1px;").arg(bodyFontCss));
-
-    const QString previewStyle = QStringLiteral(
-        "<style>"
-        "body{font-family:'PingFang SC','Microsoft YaHei UI','Noto Sans CJK SC','SimSun',sans-serif;"
-        "font-size:%1px;line-height:%2;color:#2B261B;letter-spacing:0.01em;}"
-        "p,ul,ol,li,td,th{font-size:1em;line-height:%2;margin:0 0 16px 0;}"
-        "h1,h2,h3,h4,h5,h6{font-weight:700;line-height:1.35;color:#1F2A44;margin:26px 0 14px 0;}"
-        "h1{font-size:1.95em;}"
-        "h2{font-size:1.58em;}"
-        "h3{font-size:1.34em;}"
-        "h4{font-size:1.18em;}"
-        "a{color:#1B6EF3;text-decoration:none;}"
-        "a:hover{text-decoration:underline;}"
-        "img{display:block;margin:12px auto 14px auto;max-width:100%;max-height:340px;height:auto;object-fit:contain;border-radius:6px;}"
-        "pre{margin:14px 0;padding:12px 14px;border-radius:8px;background:#F5F7FC;border:1px solid #E1E6F2;overflow:auto;}"
-        "code{font-family:'Cascadia Mono','Consolas','Courier New',monospace;font-size:1.08em;}"
-        "pre code{font-size:0.97em;line-height:1.7;color:#1E2A44;background:transparent;}"
-        "blockquote{margin:14px 0;padding:10px 14px;border-left:4px solid #B8C2D9;background:#F4F7FF;color:#3A4152;}"
-        "blockquote p{margin:0 0 8px 0;}"
-        "blockquote p:last-child{margin-bottom:0;}"
-        "</style>")
-        .arg(bodyFontCss, lineHeightCss);
-
-    const QString headCloseTag = QStringLiteral("</head>");
-    const int headCloseIndex = html.indexOf(headCloseTag, Qt::CaseInsensitive);
-    if (headCloseIndex >= 0) {
-        html.insert(headCloseIndex, previewStyle);
-    } else {
-        html.prepend(previewStyle);
-    }
-
-    return html;
+    watcher->setFuture(QtConcurrent::run([markdown, bodyFontPx, lineSpacing]() {
+        return buildPreviewHtml(markdown, bodyFontPx, lineSpacing);
+    }));
 }
 
 void AppContext::setAutoGenerateEnabled(bool enabled)
@@ -684,6 +714,9 @@ void AppContext::scanPosts()
 void AppContext::openPost(const QString &filePath)
 {
     if (filePath == m_opened.path) {
+        if (m_opened.date.trimmed().isEmpty() || m_opened.title.trimmed().isEmpty()) {
+            setOpenedPost(readMarkdown(filePath));
+        }
         return;
     }
     if (!QFile::exists(filePath)) {
@@ -1342,8 +1375,9 @@ void AppContext::handlePreviewOutput(const QString &text)
         return;
     }
 
+    const QString cleaned = sanitizeConsoleChunk(text);
     static const QRegularExpression urlRe(R"(https?://[^\s]+)");
-    const QRegularExpressionMatch match = urlRe.match(text);
+    const QRegularExpressionMatch match = urlRe.match(cleaned);
     if (!match.hasMatch()) {
         return;
     }

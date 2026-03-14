@@ -35,9 +35,53 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint
     color: layoutBg
 
+    function toFileUrl(pathText) {
+        var text = (pathText || "").trim()
+        if (text.length === 0) {
+            return ""
+        }
+        var normalized = text.replace(/\\/g, "/")
+        if (!normalized.startsWith("file:/")) {
+            normalized = "file:///" + normalized
+        }
+        return normalized
+    }
+
+    function toLocalPath(urlValue) {
+        if (!urlValue) {
+            return ""
+        }
+        if (urlValue.toLocalFile) {
+            var local = urlValue.toLocalFile()
+            if (local && local.length > 0) {
+                return local
+            }
+        }
+        var text = urlValue.toString ? urlValue.toString() : String(urlValue)
+        if (text.startsWith("file:///")) {
+            text = text.substring(8)
+        } else if (text.startsWith("file://")) {
+            text = text.substring(7)
+        }
+        return text
+    }
+
+    function openProjectFolderDialog() {
+        var presetUrl = toFileUrl(appContext.currentProjectPath || "")
+        if (presetUrl.length > 0) {
+            projectFolderDialog.currentFolder = presetUrl
+            projectFolderDialog.selectedFolder = presetUrl
+        }
+        projectFolderDialog.open()
+    }
+
     Rectangle {
+        id: sceneRoot
         anchors.fill: parent
         color: root.layoutBg
+        layer.enabled: root.resizeDegrade
+        layer.smooth: true
+        layer.mipmap: true
         z: -100
     }
 
@@ -112,9 +156,15 @@ ApplicationWindow {
     })
     property string liveMarkdownText: ""
     property string previewCoverSource: ""
+    property int previewRequestId: 0
+    property string lastPreviewMarkdown: ""
     property var envStatus: ({ node: false, hexo: false, git: false, project: false })
     property bool envStatusVisible: false
     property string pendingInitProjectPath: ""
+    property bool initProjectBusy: false
+    property string initProjectStatus: ""
+    property string pendingDeleteProjectPath: ""
+    property string pendingDeleteProjectName: ""
     property real normalWindowX: 0
     property real normalWindowY: 0
     property real normalWindowWidth: width
@@ -140,20 +190,25 @@ ApplicationWindow {
         }
     }
 
-    onWidthChanged: {
-        if (!root.visible || root.suppressResizeDegrade) return;
+    function requestResizeDegrade() {
+        if (!root.visible || root.suppressResizeDegrade) {
+            return
+        }
         resizeDegrade = true
+        previewRenderTimer.stop()
         resizeSettleTimer.restart()
     }
 
-    onHeightChanged: {
-        if (!root.visible || root.suppressResizeDegrade) return;
-        resizeDegrade = true
-        resizeSettleTimer.restart()
-    }
+    onWidthChanged: requestResizeDegrade()
+    onHeightChanged: requestResizeDegrade()
 
     onResizeDegradeChanged: {
-            // Keep hook for future adaptive tuning.
+        if (!root.contentItem) {
+            return
+        }
+        root.contentItem.layer.enabled = resizeDegrade
+        root.contentItem.layer.smooth = true
+        root.contentItem.layer.mipmap = true
     }
 
     onUiBodyFontSizeChanged: {
@@ -286,6 +341,34 @@ ApplicationWindow {
         initProjectDialog.open();
     }
 
+    function bindOpenedPostFields() {
+        if (!titleInput || !bodyEdit) {
+            return
+        }
+        root.lastPreviewMarkdown = ""
+        titleInput.text = Qt.binding(function() { return appContext.openedPostTitle })
+        categoryInput.editText = Qt.binding(function() { return appContext.openedPostCategory })
+        tagsInput.editText = Qt.binding(function() { return appContext.openedPostTags })
+        dateInput.editText = Qt.binding(function() { return appContext.openedPostDate })
+        coverInput.text = Qt.binding(function() { return appContext.openedPostCover })
+        descriptionInput.text = Qt.binding(function() { return appContext.openedPostDescription })
+        bodyEdit.text = Qt.binding(function() { return appContext.openedPostBody })
+        if (editorContent && editorContent.isMarkdown) {
+            previewRenderTimer.restart()
+        } else {
+            root.liveMarkdownText = ""
+        }
+    }
+
+    function requestDeleteProject(name, path) {
+        pendingDeleteProjectName = name || ""
+        pendingDeleteProjectPath = path || ""
+        if (pendingDeleteProjectPath.length === 0) {
+            return
+        }
+        deleteProjectDialog.open()
+    }
+
     function syncPreviewText(forceRender) {
         if (forceRender === undefined)
             forceRender = false;
@@ -299,10 +382,17 @@ ApplicationWindow {
         root.previewCoverSource = coverUrl
         var nextText = bodyEdit.text || "";
         nextText = nextText.replace(/^\s*\n+/, "")
-        var nextPreview = appContext.renderMarkdownForPreview(nextText, root.uiBodyFontSize, root.uiLineSpacing);
-        if (root.liveMarkdownText !== nextPreview) {
-            root.liveMarkdownText = nextPreview;
+        if (nextText.trim().length === 0) {
+            root.lastPreviewMarkdown = ""
+            root.liveMarkdownText = ""
+            return
         }
+        if (!forceRender && root.lastPreviewMarkdown === nextText) {
+            return
+        }
+        root.lastPreviewMarkdown = nextText
+        root.previewRequestId += 1
+        appContext.renderMarkdownForPreviewAsync(nextText, root.uiBodyFontSize, root.uiLineSpacing, root.previewRequestId)
     }
 
     function toggleConsoleExpanded() {
@@ -961,11 +1051,14 @@ ApplicationWindow {
         root.envStatus = appContext.environmentCheck();
         root.diagnosticsText = JSON.stringify(appContext.diagnosticsReport(), null, 2)
         root.refreshTopicStats();
-        titleInput.text = appContext.openedPostTitle
-        categoryInput.editText = appContext.openedPostCategory
-        tagsInput.editText = appContext.openedPostTags
-        dateInput.editText = appContext.openedPostDate
-        bodyEdit.text = appContext.openedPostBody
+        if (root.contentItem) {
+            root.contentItem.layer.enabled = root.resizeDegrade
+            root.contentItem.layer.smooth = true
+            root.contentItem.layer.mipmap = true
+        }
+        Qt.callLater(function() {
+            root.bindOpenedPostFields()
+        })
         if (appContext.firstRun) {
             firstRunDialog.open()
         }
@@ -984,7 +1077,12 @@ ApplicationWindow {
         id: resizeSettleTimer
         interval: 120
         repeat: false
-        onTriggered: root.resizeDegrade = false
+        onTriggered: {
+            root.resizeDegrade = false
+            if (editorContent && editorContent.isMarkdown) {
+                previewRenderTimer.restart()
+            }
+        }
     }
 
     Timer {
@@ -1346,7 +1444,7 @@ ApplicationWindow {
                     clip: true
                     model: appContext.posts
                     reuseItems: true
-                    cacheBuffer: 360
+                    cacheBuffer: 720
                     boundsBehavior: Flickable.StopAtBounds
                     flickDeceleration: 13000
                     maximumFlickVelocity: 6400
@@ -1682,7 +1780,7 @@ ApplicationWindow {
                 interval: root.previewDebounceMs
                 repeat: false
                 onTriggered: {
-                    if (!root.degradeRendering) {
+                    if (!root.degradeRendering && !root.resizeDegrade) {
                         root.syncPreviewText(true)
                     }
                 }
@@ -1691,21 +1789,22 @@ ApplicationWindow {
             Connections {
                 target: appContext
                 function onOpenedPostChanged() {
-                    titleInput.text = appContext.openedPostTitle
-                    categoryInput.editText = appContext.openedPostCategory
-                    tagsInput.editText = appContext.openedPostTags
-                    dateInput.editText = appContext.openedPostDate
-                    coverInput.text = appContext.openedPostCover
-                    descriptionInput.text = appContext.openedPostDescription
-                    bodyEdit.text = appContext.openedPostBody
-                    if (editorContent.isMarkdown) {
-                        previewRenderTimer.restart()
-                    } else {
-                        root.liveMarkdownText = ""
-                    }
+                    root.bindOpenedPostFields()
                     Qt.callLater(function() {
                         editorScrollView.contentY = 0
                     })
+                }
+            }
+
+            Connections {
+                target: appContext
+                function onPreviewMarkdownReady(html, requestId) {
+                    if (requestId !== root.previewRequestId) {
+                        return
+                    }
+                    if (root.liveMarkdownText !== html) {
+                        root.liveMarkdownText = html
+                    }
                 }
             }
 
@@ -2191,23 +2290,14 @@ ApplicationWindow {
 
                                     RowLayout {
                                         Layout.fillWidth: true
-                                        UiTextField {
-                                            id: projPathInput
-                                            text: appContext.currentProjectPath || "D:/hexo-blog"
-                                            Layout.fillWidth: true
-                                        }
-                                        UiButton {
-                                            text: "添加/切换"
-                                                Layout.preferredWidth: 120
-                                            tone: "filled"
-                                            onClicked: projectFolderDialog.open()
-                                        }
-                                    }
-
-                                    RowLayout {
-                                        Layout.fillWidth: true
                                         spacing: 8
 
+                                        UiButton {
+                                            Layout.fillWidth: true
+                                            text: "添加/切换"
+                                            tone: "filled"
+                                            onClicked: root.openProjectFolderDialog()
+                                        }
                                         UiButton {
                                             Layout.fillWidth: true
                                             text: "重载数据"
@@ -2246,7 +2336,7 @@ ApplicationWindow {
 
                             UiCard {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 198
+                                implicitHeight: Math.max(120, projectListView.contentHeight + 16)
                                 color: root.md3SurfaceContainer
 
                                 ListView {
@@ -2266,31 +2356,49 @@ ApplicationWindow {
                                         color: modelData.path === appContext.currentProjectPath ? root.md3PrimaryContainer : root.md3SurfaceContainerLow
                                         border.color: root.md3OutlineVariant
                                         border.width: 0
+                                        property bool isCurrent: modelData.path === appContext.currentProjectPath
                                         RowLayout {
                                             anchors.fill: parent
                                             anchors.margins: 10
+                                            spacing: 8
                                             Column {
                                                 Layout.fillWidth: true
                                                 spacing: 2
                                                 Text {
                                                     text: modelData.name
                                                     font.weight: Font.Medium
-                                                    color: modelData.path === appContext.currentProjectPath ? root.md3OnPrimaryContainer : root.md3OnSurface
+                                                    color: isCurrent ? root.md3OnPrimaryContainer : root.md3OnSurface
                                                     elide: Text.ElideRight
-                                                    width: projectListView.width - 160
+                                                    width: parent.width
                                                 }
                                                 Text {
                                                     text: modelData.path
                                                     color: root.md3OnSurfaceVariant
                                                     font.pixelSize: 12
                                                     elide: Text.ElideMiddle
-                                                    width: projectListView.width - 160
+                                                    width: parent.width
+                                                }
+                                            }
+                                            RowLayout {
+                                                visible: !isCurrent
+                                                spacing: 6
+                                                UiButton {
+                                                    text: "删除"
+                                                    tone: "text"
+                                                    danger: true
+                                                    onClicked: root.requestDeleteProject(modelData.name, modelData.path)
+                                                }
+                                                UiButton {
+                                                    text: "选择"
+                                                    tone: "outlined"
+                                                    onClicked: appContext.switchProject(modelData.path)
                                                 }
                                             }
                                             UiButton {
-                                                text: modelData.path === appContext.currentProjectPath ? "已选中" : "选择"
-                                                tone: modelData.path === appContext.currentProjectPath ? "tonal" : "outlined"
-                                                onClicked: appContext.switchProject(modelData.path)
+                                                visible: isCurrent
+                                                enabled: false
+                                                text: "已选中"
+                                                tone: "tonal"
                                             }
                                         }
                                     }
@@ -2893,17 +3001,29 @@ ApplicationWindow {
         title: ""
         standardButtons: Dialog.NoButton
         padding: 0
+        implicitWidth: 460
 
-        function confirmInit() {
-            if (appContext.initializeHexoProject(root.pendingInitProjectPath)) {
-                root.envStatus = appContext.environmentCheck();
-                root.envStatusVisible = true;
-                if (root.envStatus.node && root.envStatus.hexo && root.envStatus.git) {
-                    envStatusTimer.restart();
-                } else {
-                    envStatusTimer.stop();
-                }
+        function startInit() {
+            if (root.initProjectBusy) {
+                return
             }
+            root.initProjectBusy = true
+            root.initProjectStatus = "任务运行中..."
+            Qt.callLater(function() {
+                var ok = appContext.initializeHexoProject(root.pendingInitProjectPath)
+                root.initProjectBusy = false
+                root.initProjectStatus = ""
+                if (ok) {
+                    root.envStatus = appContext.environmentCheck();
+                    root.envStatusVisible = true;
+                    if (root.envStatus.node && root.envStatus.hexo && root.envStatus.git) {
+                        envStatusTimer.restart();
+                    } else {
+                        envStatusTimer.stop();
+                    }
+                }
+                initProjectDialog.close()
+            })
         }
 
         background: Rectangle {
@@ -2914,13 +3034,13 @@ ApplicationWindow {
         }
 
         contentItem: Item {
-            width: 460
-            height: dialogCol.implicitHeight + 32
+            implicitWidth: 460
+            implicitHeight: dialogCol.implicitHeight + 40
 
             ColumnLayout {
                 id: dialogCol
-                anchors.fill: parent
-                anchors.margins: 20
+                width: parent.implicitWidth - 40
+                anchors.centerIn: parent
                 spacing: 16
 
                 RowLayout {
@@ -2951,13 +3071,23 @@ ApplicationWindow {
                             font.pixelSize: 16
                             font.weight: Font.DemiBold
                             color: root.md3OnSurface
+                            Layout.fillWidth: true
                         }
                         Text {
                             text: "检测到该目录不是 Hexo 项目，是否执行初始化并切换？"
-                            color: root.md3OnSurfaceVariant
+                            color: root.md3OnSurface
                             font.pixelSize: 13
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
+                            width: parent.width
+                        }
+                        Text {
+                            text: "初始化成功后会自动启动预览，并打开浏览器。"
+                            color: root.md3OnSurface
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                            width: parent.width
                         }
                     }
                 }
@@ -2965,8 +3095,10 @@ ApplicationWindow {
                 UiCard {
                     Layout.fillWidth: true
                     color: root.md3SurfaceContainer
+                    implicitHeight: initProjectDetailCol.implicitHeight + 24
 
                     ColumnLayout {
+                        id: initProjectDetailCol
                         anchors.fill: parent
                         anchors.margins: 12
                         spacing: 6
@@ -2984,12 +3116,30 @@ ApplicationWindow {
                             wrapMode: Text.WrapAnywhere
                             Layout.fillWidth: true
                         }
+                    }
+                }
+
+                UiCard {
+                    visible: root.initProjectBusy
+                    Layout.fillWidth: true
+                    color: root.md3SurfaceContainer
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 10
+
+                        BusyIndicator {
+                            running: root.initProjectBusy
+                            width: 22
+                            height: 22
+                        }
                         Text {
-                            text: "初始化成功后会自动启动预览，并打开浏览器。"
-                            color: root.md3OnSurfaceVariant
-                            font.pixelSize: 12
-                            wrapMode: Text.WordWrap
+                            text: root.initProjectStatus
+                            color: root.md3OnSurface
+                            font.pixelSize: 13
                             Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
                         }
                     }
                 }
@@ -3002,14 +3152,141 @@ ApplicationWindow {
                     UiButton {
                         text: "取消"
                         tone: "outlined"
+                        enabled: !root.initProjectBusy
                         onClicked: initProjectDialog.close()
                     }
                     UiButton {
-                        text: "初始化并切换"
+                        text: root.initProjectBusy ? "初始化中..." : "初始化并切换"
                         tone: "filled"
+                        enabled: !root.initProjectBusy
+                        onClicked: initProjectDialog.startInit()
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: deleteProjectDialog
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        title: ""
+        standardButtons: Dialog.NoButton
+        padding: 0
+        implicitWidth: 420
+
+        background: Rectangle {
+            radius: root.shapeLarge
+            color: root.md3SurfaceContainerLowest
+            border.width: 1
+            border.color: root.md3OutlineVariant
+        }
+
+        contentItem: Item {
+            implicitWidth: 420
+            implicitHeight: deleteDialogCol.implicitHeight + 40
+
+            ColumnLayout {
+                id: deleteDialogCol
+                width: parent.implicitWidth - 40
+                anchors.centerIn: parent
+                spacing: 16
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+
+                    Rectangle {
+                        width: 40
+                        height: 40
+                        radius: 20
+                        color: root.md3ErrorContainer
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "!"
+                            font.pixelSize: 18
+                            font.weight: Font.DemiBold
+                            color: root.md3Error
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+
+                        Text {
+                            text: "删除项目"
+                            font.pixelSize: 16
+                            font.weight: Font.DemiBold
+                            color: root.md3OnSurface
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: "该操作仅移除本地项目记录，不会删除磁盘文件。"
+                            color: root.md3OnSurface
+                            font.pixelSize: 13
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                            width: parent.width
+                        }
+                    }
+                }
+
+                UiCard {
+                    Layout.fillWidth: true
+                    color: root.md3SurfaceContainer
+                    implicitHeight: deleteProjectDetailCol.implicitHeight + 24
+
+                    ColumnLayout {
+                        id: deleteProjectDetailCol
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 6
+
+                        Text {
+                            text: "项目"
+                            color: root.md3OnSurfaceVariant
+                            font.pixelSize: 12
+                        }
+                        Text {
+                            text: root.pendingDeleteProjectName
+                            color: root.md3OnSurface
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                            width: parent.width
+                        }
+                        Text {
+                            text: root.pendingDeleteProjectPath
+                            color: root.md3OnSurfaceVariant
+                            font.pixelSize: 12
+                            elide: Text.ElideMiddle
+                            Layout.fillWidth: true
+                            width: parent.width
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    Item { Layout.fillWidth: true }
+                    UiButton {
+                        text: "取消"
+                        tone: "outlined"
+                        onClicked: deleteProjectDialog.close()
+                    }
+                    UiButton {
+                        text: "删除"
+                        tone: "filled"
+                        danger: true
                         onClicked: {
-                            initProjectDialog.close()
-                            initProjectDialog.confirmInit()
+                            appContext.removeProject(root.pendingDeleteProjectPath)
+                            root.pendingDeleteProjectPath = ""
+                            root.pendingDeleteProjectName = ""
+                            deleteProjectDialog.close()
                         }
                     }
                 }
@@ -3017,27 +3294,20 @@ ApplicationWindow {
         }
     }
 
-    FileDialog {
+    FolderDialog {
         id: projectFolderDialog
         title: "选择 Hexo 项目目录"
-        fileMode: FileDialog.Directory
-        onOpened: {
-            var path = (projPathInput && projPathInput.text) ? projPathInput.text.trim() : ""
-            if (path.length === 0) {
-                return
-            }
-            var normalized = path.replace(/\\/g, "/")
-            if (!normalized.startsWith("file:/")) {
-                normalized = "file:///" + normalized
-            }
-            projectFolderDialog.currentFolder = normalized
-        }
         onAccepted: {
-            var selected = selectedFile ? selectedFile.toLocalFile() : ""
+            var pickedUrl = selectedFolder
+            if (!pickedUrl || pickedUrl.toString().length === 0) {
+                pickedUrl = currentFolder
+            }
+            var selected = root.toLocalPath(pickedUrl)
             if (!selected || selected.length === 0) {
+                appContext.appendStructuredLog("warn", "PROJECT", "folder dialog accepted but empty")
                 return
             }
-            projPathInput.text = selected
+            appContext.appendStructuredLog("info", "PROJECT", "selected folder: " + selected)
             root.addOrInitializeProject(selected)
         }
     }

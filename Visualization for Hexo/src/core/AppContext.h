@@ -134,6 +134,10 @@ public:
     Q_INVOKABLE QString renderMarkdownForPreview(const QString &markdown,
                                                  int bodyFontPx = 20,
                                                  qreal lineSpacing = 1.9) const;
+    Q_INVOKABLE void renderMarkdownForPreviewAsync(const QString &markdown,
+                                                   int bodyFontPx,
+                                                   qreal lineSpacing,
+                                                   int requestId);
     Q_INVOKABLE void applyAiSettings(const QString &provider,
                                      const QString &apiBase,
                                      const QString &model);
@@ -155,6 +159,7 @@ signals:
     void aiProviderChanged();
     void aiApiBaseChanged();
     void aiModelChanged();
+    void previewMarkdownReady(const QString &html, int requestId);
 
 private:
     struct PostData {
