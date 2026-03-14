@@ -100,6 +100,7 @@ $env:ZHIPUAI_API_KEY = "你的 API Key"
 ## CI/CD
 
 - Push 到 `main` 会执行 cppcheck 静态检查并生成 Windows 打包产物
+- Push `main` 会自动发布 GitHub Release（预发布）
 - Push `v*` tag 或手动触发工作流时，会发布 GitHub Release（tag 发布为正式版本，手动触发为预发布）
 - GitHub Actions 使用 `install-qt-action` 并缓存 Qt，打包时会自动解析 `QT_ROOT_DIR` 以确保 `windeployqt` 版本匹配
 
