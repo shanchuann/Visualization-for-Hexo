@@ -806,13 +806,32 @@ void AppContext::deletePost(const QString &filePath)
     if (!f.exists()) {
         return;
     }
+    // Remember index before rescan
+    int deletedIndex = -1;
+    const bool wasOpened = (m_opened.path == filePath);
+    if (wasOpened) {
+        for (int i = 0; i < m_posts.size(); ++i) {
+            if (m_posts[i].toMap().value("path").toString() == filePath) {
+                deletedIndex = i;
+                break;
+            }
+        }
+    }
+
     if (f.remove()) {
         appendLog(QString("[post] deleted: %1").arg(filePath));
-        if (m_opened.path == filePath) {
-            clearOpenedPost();
-        }
         scanPosts();
         rebuildSearchIndex();
+
+        if (wasOpened) {
+            if (!m_posts.isEmpty()) {
+                int nextIndex = qMin(deletedIndex, m_posts.size() - 1);
+                if (nextIndex < 0) nextIndex = 0;
+                openPost(m_posts[nextIndex].toMap().value("path").toString());
+            } else {
+                clearOpenedPost();
+            }
+        }
     } else {
         appendLog(QString("[post] failed to delete: %1").arg(filePath));
     }

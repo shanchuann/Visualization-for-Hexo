@@ -11,6 +11,7 @@
 #include <QQmlError>
 #include <QQuickWindow>
 #include <QColor>
+#include <QScreen>
 
 #ifdef Q_OS_WIN
 #include <Windows.h>
@@ -61,6 +62,32 @@ public:
         Q_UNUSED(eventType);
         MSG *msg = static_cast<MSG *>(message);
         if (msg->hwnd && msg->hwnd == hwnd) {
+            // ---- WM_NCCALCSIZE: suppress native frame drawing ----
+            // By returning 0 for WM_NCCALCSIZE, we tell Windows to use the
+            // entire window rect as the client area, effectively hiding the
+            // native title bar and borders while keeping the window styles
+            // that enable Aero Snap, taskbar interactions, etc.
+            if (msg->message == WM_NCCALCSIZE) {
+                if (msg->wParam == TRUE) {
+                    // When maximized, adjust for the auto-hide taskbar and
+                    // prevent the window from covering the taskbar.
+                    WINDOWPLACEMENT wp = {};
+                    wp.length = sizeof(WINDOWPLACEMENT);
+                    GetWindowPlacement(hwnd, &wp);
+                    if (wp.showCmd == SW_MAXIMIZE) {
+                        NCCALCSIZE_PARAMS *params = reinterpret_cast<NCCALCSIZE_PARAMS *>(msg->lParam);
+                        HMONITOR hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                        MONITORINFO mi;
+                        mi.cbSize = sizeof(MONITORINFO);
+                        if (GetMonitorInfo(hMon, &mi)) {
+                            params->rgrc[0] = mi.rcWork;
+                        }
+                    }
+                }
+                *result = 0;
+                return true;
+            }
+
             if (msg->message == WM_GETMINMAXINFO) {
                 MINMAXINFO *mmi = reinterpret_cast<MINMAXINFO *>(msg->lParam);
                 HMONITOR hMonitor = MonitorFromWindow(msg->hwnd, MONITOR_DEFAULTTONEAREST);
@@ -94,13 +121,16 @@ public:
                 UINT dpi = GetDpiForWindow(msg->hwnd);
                 int frameX = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
                 int frameY = GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
-                // 顶部标题栏高度（用于拖动），52px 为我们在 QML 中定义的高度，按 DPI 缩放
-                int titleHeight = 52 * dpi / 96;
+                // Expand draggable sensing height so dragging feels smoother.
+                int titleHeight = 64 * dpi / 96;
 
-                bool isLeft = (x >= winrect.left && x < winrect.left + frameX);
-                bool isRight = (x < winrect.right && x >= winrect.right - frameX);
-                bool isTop = (y >= winrect.top && y < winrect.top + frameY);
-                bool isBottom = (y < winrect.bottom && y >= winrect.bottom - frameY);
+                // When maximized, don't allow edge-resize
+                bool maximized = IsZoomed(hwnd);
+
+                bool isLeft   = !maximized && (x >= winrect.left && x < winrect.left + frameX);
+                bool isRight  = !maximized && (x < winrect.right && x >= winrect.right - frameX);
+                bool isTop    = !maximized && (y >= winrect.top && y < winrect.top + frameY);
+                bool isBottom = !maximized && (y < winrect.bottom && y >= winrect.bottom - frameY);
 
                 if (isTop && isLeft) {
                     *result = HTTOPLEFT;
@@ -129,12 +159,21 @@ public:
                 }
 
                 // 中间区域可拖拽，但要避开左侧三色按钮、右侧操作按钮，以及顶部中央源码/预览切换。
-                int leftExclude = 280 * dpi / 96;
-                int rightExclude = 430 * dpi / 96;
-                int centerExcludeHalf = 90 * dpi / 96;
+                int leftExclude = 220 * dpi / 96;
+                int rightExclude = 320 * dpi / 96;
+                int centerExcludeHalf = 100 * dpi / 96;
                 int centerX = (winrect.left + winrect.right) / 2;
                 bool inCenterControl = (x >= centerX - centerExcludeHalf && x <= centerX + centerExcludeHalf);
-                if (y >= winrect.top + frameY && y < winrect.top + titleHeight) {
+                if (y >= winrect.top + (maximized ? 0 : frameY) && y < winrect.top + titleHeight) {
+                    // Explicitly keep left/right control zones as client area so
+                    // QML MouseArea (traffic lights and right-side toolbar icons)
+                    // always receives click events.
+                    if (inCenterControl
+                        || x < winrect.left + leftExclude
+                        || x >= winrect.right - rightExclude) {
+                        *result = HTCLIENT;
+                        return true;
+                    }
                     if (!inCenterControl
                         && x >= winrect.left + leftExclude
                         && x < winrect.right - rightExclude) {
@@ -142,8 +181,16 @@ public:
                         return true;
                     }
                 }
-                
+
                 return false;
+            }
+
+            // ---- WM_ACTIVATE: redraw frame on activation to avoid visual glitch ----
+            if (msg->message == WM_ACTIVATE) {
+                MARGINS m = {0, 0, 0, 1};
+                DwmExtendFrameIntoClientArea(hwnd, &m);
+                *result = 0;
+                // Don't return true – let Qt also process the activation
             }
 
             if (msg->message == WM_SIZE) {
@@ -234,6 +281,21 @@ int main(int argc, char *argv[])
 
         HWND hwnd = reinterpret_cast<HWND>(window->winId());
 
+        // --- Enable native window styles for proper Windows integration ---
+        // Adding WS_THICKFRAME enables Aero Snap (drag-to-edge maximize/tile).
+        // WS_MINIMIZEBOX / WS_MAXIMIZEBOX enable taskbar minimize/restore.
+        // WS_CAPTION | WS_SYSMENU enable the system menu (right-click taskbar).
+        // We keep Qt.FramelessWindowHint in QML so Qt doesn't draw its own
+        // decorations, and handle WM_NCCALCSIZE to suppress the native frame.
+        LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+        style |= WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CAPTION | WS_SYSMENU;
+        SetWindowLongPtr(hwnd, GWL_STYLE, style);
+
+        // Extend a tiny (1px) frame into the client area so DWM still
+        // provides the drop shadow around the frameless window.
+        MARGINS shadow = {0, 0, 0, 1};
+        DwmExtendFrameIntoClientArea(hwnd, &shadow);
+
         WinFramelessFilter *filter = new WinFramelessFilter();
         filter->hwnd = hwnd;
         const QSize minSize = window->minimumSize();
@@ -242,8 +304,24 @@ int main(int argc, char *argv[])
         qApp->installNativeEventFilter(filter);
 
         filter->applyRoundedCorners(true);
+        // SWP_FRAMECHANGED forces Windows to re-evaluate the frame after our
+        // style changes and WM_NCCALCSIZE handler take effect.
         SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
                      SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
+
+        QScreen *screen = window->screen();
+        if (!screen) {
+            const auto screens = QGuiApplication::screens();
+            if (!screens.isEmpty()) {
+                screen = screens.constFirst();
+            }
+        }
+        if (screen) {
+            const QRect available = screen->availableGeometry();
+            const int centeredX = available.x() + (available.width() - window->width()) / 2;
+            const int centeredY = available.y() + (available.height() - window->height()) / 2;
+            window->setPosition(centeredX, centeredY);
+        }
 
         window->setProperty("visible", true);
     }

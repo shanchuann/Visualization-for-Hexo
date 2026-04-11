@@ -169,6 +169,7 @@ ApplicationWindow {
     property real normalWindowY: 0
     property real normalWindowWidth: width
     property real normalWindowHeight: height
+    property bool maximizeToggleActive: false
     readonly property int edgeSnapThreshold: 18
     readonly property string iconBase: "qrc:/qt/qml/visualization for hexo/assets/iconpark/"
     readonly property bool isWindowMaximized: root.visibility === Window.Maximized || ((root.windowState & Qt.WindowMaximized) !== 0)
@@ -227,6 +228,16 @@ ApplicationWindow {
         if (!root.visible) {
             return
         }
+        if (root.visibility === Window.Maximized || root.visibility === Window.FullScreen) {
+            root.maximizeToggleActive = true
+        } else if (root.visibility === Window.Windowed) {
+            root.maximizeToggleActive = false
+        }
+        // When Windows maximizes the window (e.g. Aero Snap, taskbar),
+        // remember the normal geometry so the custom restore button works.
+        if (root.visibility === Window.Maximized) {
+            root.rememberNormalWindowGeometry()
+        }
         windowStateRefreshTimer.restart()
     }
 
@@ -234,6 +245,11 @@ ApplicationWindow {
         if (!root.visible) {
             return
         }
+        root.maximizeToggleActive =
+            root.visibility === Window.Maximized
+            || root.visibility === Window.FullScreen
+            || ((root.windowState & Qt.WindowMaximized) !== 0)
+            || ((root.windowState & Qt.WindowFullScreen) !== 0)
         windowStateRefreshTimer.restart()
     }
 
@@ -264,6 +280,7 @@ ApplicationWindow {
     }
 
     function restoreNormalGeometry() {
+        root.maximizeToggleActive = false
         root.showNormal()
         root.x = normalWindowX
         root.y = normalWindowY
@@ -272,7 +289,7 @@ ApplicationWindow {
     }
 
     function rememberNormalWindowGeometry() {
-        if (root.isWindowMaximized) return;
+        if (root.maximizeToggleActive || root.isWindowFullScreen || root.isWindowMaximized) return;
         normalWindowX = root.x;
         normalWindowY = root.y;
         normalWindowWidth = root.width;
@@ -281,6 +298,7 @@ ApplicationWindow {
 
     function showWindowMaximizedSafe() {
         root.rememberNormalWindowGeometry()
+        root.maximizeToggleActive = true
         root.showMaximized()
         windowStateRefreshTimer.restart()
     }
@@ -320,7 +338,7 @@ ApplicationWindow {
     }
 
     function toggleMaximizeRestore() {
-        if (root.isWindowMaximized) {
+        if (root.maximizeToggleActive || root.isWindowFullScreen || root.isWindowMaximized) {
             root.restoreNormalGeometry()
             windowStateRefreshTimer.restart()
         } else {
@@ -1038,14 +1056,25 @@ ApplicationWindow {
         }
     }
 
+    Connections {
+        target: appContext
+        function onOpenedPostChanged() {
+            if (dateInput) {
+                dateInput.editText = appContext.openedPostDate
+            }
+        }
+    }
+
     Component.onCompleted: {
-        var sg = root.screen ? root.screen.availableGeometry : Screen.availableGeometry
-        var initX = sg.x + (sg.width - root.width) / 2
-        var initY = sg.y + (sg.height - root.height) / 2
-        root.normalWindowX = initX
-        root.normalWindowY = initY
-        root.x = initX
-        root.y = initY
+        root.normalWindowX = root.x
+        root.normalWindowY = root.y
+        root.normalWindowWidth = root.width
+        root.normalWindowHeight = root.height
+        root.maximizeToggleActive =
+            root.visibility === Window.Maximized
+            || root.visibility === Window.FullScreen
+            || ((root.windowState & Qt.WindowMaximized) !== 0)
+            || ((root.windowState & Qt.WindowFullScreen) !== 0)
         root.refreshConfigRows();
         root.liveMarkdownText = "";
         root.envStatus = appContext.environmentCheck();
@@ -1815,13 +1844,59 @@ ApplicationWindow {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                height: root.consoleVisible ? (expanded ? 240 : root.consoleCollapsedHeight) : 0
+                height: root.consoleVisible ? (expanded ? consoleExpandedHeight : root.consoleCollapsedHeight) : 0
                 color: root.md3InverseSurface
                 z: 5
                 clip: true
 
                 property bool expanded: false
+                property int consoleExpandedHeight: 280
+                property int consoleMinHeight: 120
+                property int consoleMaxHeight: 600
                 Behavior on height { NumberAnimation { duration: 140 } }
+
+                // ---- Drag handle to resize console ----
+                Rectangle {
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: 6
+                    color: "transparent"
+                    z: 20
+
+                    // Visual indicator bar
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 40
+                        height: 3
+                        radius: 1.5
+                        color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, consoleDragArea.containsMouse ? 0.6 : 0.25)
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                    }
+
+                    MouseArea {
+                        id: consoleDragArea
+                        anchors.fill: parent
+                        anchors.topMargin: -3
+                        anchors.bottomMargin: -3
+                        cursorShape: Qt.SizeVerCursor
+                        hoverEnabled: true
+                        property real startY: 0
+                        property int startHeight: 0
+                        onPressed: function(mouse) {
+                            startY = mapToGlobal(mouse.x, mouse.y).y
+                            startHeight = consoleRect.consoleExpandedHeight
+                        }
+                        onPositionChanged: function(mouse) {
+                            if (pressed) {
+                                var globalY = mapToGlobal(mouse.x, mouse.y).y
+                                var delta = startY - globalY
+                                var newH = Math.max(consoleRect.consoleMinHeight, Math.min(consoleRect.consoleMaxHeight, startHeight + delta))
+                                consoleRect.consoleExpandedHeight = newH
+                            }
+                        }
+                    }
+                }
 
                 Rectangle {
                     id: consoleHeader
@@ -1934,7 +2009,7 @@ ApplicationWindow {
                         TextField {
                             id: consoleInputField
                             Layout.fillWidth: true
-                            placeholderText: "输入命令回车执行；Ctrl+C 或 /ctrl+c 中断当前任务"
+                            placeholderText: "输入命令回车执行；Ctrl+C 中断 · ↑↓ 历史命令"
                             placeholderTextColor: "#FFFFFF"
                             color: root.md3InverseOnSurface
                             selectionColor: Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.45)
@@ -1942,10 +2017,37 @@ ApplicationWindow {
                             font.family: "Consolas"
                             font.pixelSize: 12
                             enabled: root.consoleVisible
+
+                            // Command history (pwsh-like up/down)
+                            property var commandHistory: []
+                            property int historyIndex: -1
+
                             Keys.onPressed: function(event) {
                                 if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C) {
                                     appContext.submitConsoleInput("/ctrl+c")
                                     event.accepted = true
+                                    return
+                                }
+                                if (event.key === Qt.Key_Up) {
+                                    if (commandHistory.length > 0) {
+                                        if (historyIndex < commandHistory.length - 1) {
+                                            historyIndex++
+                                        }
+                                        text = commandHistory[commandHistory.length - 1 - historyIndex]
+                                    }
+                                    event.accepted = true
+                                    return
+                                }
+                                if (event.key === Qt.Key_Down) {
+                                    if (historyIndex > 0) {
+                                        historyIndex--
+                                        text = commandHistory[commandHistory.length - 1 - historyIndex]
+                                    } else {
+                                        historyIndex = -1
+                                        text = ""
+                                    }
+                                    event.accepted = true
+                                    return
                                 }
                             }
                             background: Rectangle {
@@ -1958,6 +2060,15 @@ ApplicationWindow {
                                 var cmd = text.trim()
                                 if (cmd.length === 0)
                                     return
+                                // Record in history (avoid duplicates at end)
+                                if (commandHistory.length === 0 || commandHistory[commandHistory.length - 1] !== cmd) {
+                                    commandHistory.push(cmd)
+                                    // Keep last 100 commands
+                                    if (commandHistory.length > 100) {
+                                        commandHistory.shift()
+                                    }
+                                }
+                                historyIndex = -1
                                 appContext.submitConsoleInput(cmd)
                                 text = ""
                             }

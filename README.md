@@ -81,13 +81,13 @@ $env:ZHIPUAI_API_KEY = "你的 API Key"
 调试构建示例(把路径换成你本机 Qt 安装目录)：
 
 ```powershell
-& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Debug -QtInstall "D:\Qt\6.8.0\msvc2022_64"
+& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Debug -QtInstall "D:\Qt\6.9.3\msvc2022_64"
 ```
 
 发布构建示例：
 
 ```powershell
-& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Release -QtInstall "D:\Qt\6.8.0\msvc2022_64"
+& ".\Visualization for Hexo\scripts\package.ps1" -Configuration Release -QtInstall "D:\Qt\6.9.3\msvc2022_64"
 ```
 
 常用参数：
