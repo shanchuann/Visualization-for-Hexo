@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Markdown Editor Host</title>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", sans-serif; background: #f7f8fc; }
+    #root { padding: 16px; color: #3f4a5a; }
+    textarea { width: 100%; height: calc(100vh - 72px); border: 1px solid #cfd6e5; border-radius: 8px; padding: 12px; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <h3>Markdown Editor Placeholder</h3>
+    <textarea id="editor" placeholder="Bridge-ready editor container"></textarea>
+    <div style="margin-top: 8px; display: flex; gap: 8px;">
+      <button id="saveBtn">Save</button>
+    </div>
+  </div>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script>
+    let bridge = null;
+    const editor = document.getElementById('editor');
+
+    function bindBridge() {
+      if (!window.qt || !window.qt.webChannelTransport) {
+        return;
+      }
+      new QWebChannel(window.qt.webChannelTransport, function(channel) {
+        bridge = channel.objects.editorBridge;
+        if (!bridge) {
+          return;
+        }
+        bridge.contentChanged.connect(function() {
+          if (typeof bridge.content === 'string' && editor.value !== bridge.content) {
+            editor.value = bridge.content;
+          }
+        });
+        if (typeof bridge.content === 'string') {
+          editor.value = bridge.content;
+        }
+      });
+    }
+
+    window.HexoBridge = {
+      getContent: () => editor.value,
+      setContent: (v) => {
+        editor.value = v || '';
+        if (bridge && typeof bridge.notifyContentChangedFromJs === 'function') {
+          bridge.notifyContentChangedFromJs(editor.value);
+        }
+      }
+    };
+
+    editor.addEventListener('input', () => {
+      if (bridge && typeof bridge.notifyContentChangedFromJs === 'function') {
+        bridge.notifyContentChangedFromJs(editor.value);
+      }
+    });
+
+    document.getElementById('saveBtn').addEventListener('click', () => {
+      if (bridge && typeof bridge.requestSave === 'function') {
+        bridge.requestSave();
+      }
+    });
+
+    bindBridge();
+  </script>
+</body>
+</html>
