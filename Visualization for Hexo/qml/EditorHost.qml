@@ -29,8 +29,10 @@ Item {
             webChannel: bridgeChannel
 
             onLoadingChanged: function(loadRequest) {
-                root.loadingPage = loadRequest.status === WebEngineLoadRequest.LoadStartedStatus
-                if (loadRequest.status === WebEngineLoadRequest.LoadSucceededStatus) {
+                var LoadStarted = (typeof WebEngineLoadRequest !== 'undefined') ? WebEngineLoadRequest.LoadStartedStatus : 1
+                var LoadSucceeded = (typeof WebEngineLoadRequest !== 'undefined') ? WebEngineLoadRequest.LoadSucceededStatus : 2
+                root.loadingPage = loadRequest.status === LoadStarted
+                if (loadRequest.status === LoadSucceeded) {
                     webEditor.runJavaScript("window.HexoBridge && window.HexoBridge.setContent(" + JSON.stringify(root.content || "") + ");")
                 }
             }

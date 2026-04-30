@@ -2,6 +2,7 @@ param(
     [string]$Configuration = "Release",
     [string]$Platform = "x64",
     [string]$Toolset = "",
+    [string]$VsDevCmd = "",
     [string]$QtInstall = "",
     [string]$DistRoot = "",
     [switch]$Clean,
@@ -39,13 +40,52 @@ function Resolve-QtInstallDir {
     return $null
 }
 
+function Import-VsDevEnv {
+    param(
+        [string]$VsDevCmdPath = "D:\Program Files\VScommunity\Common7\Tools\VsDevCmd.bat"
+    )
+
+    if (-not (Test-Path $VsDevCmdPath)) {
+        Write-Host "VsDevCmd not found at $VsDevCmdPath"
+        return $false
+    }
+
+    Write-Host "Loading Visual Studio developer environment from: $VsDevCmdPath"
+    $output = & cmd.exe /c "call `"$VsDevCmdPath`" && set"
+    foreach ($line in $output) {
+        if ($line -and $line -match "=") {
+            $parts = $line -split "=",2
+            try {
+                $name = $parts[0]
+                $value = $parts[1]
+                Set-Item -Path ("env:" + $name) -Value $value -ErrorAction SilentlyContinue
+            } catch {
+                # ignore parse errors
+            }
+        }
+    }
+
+    return $true
+}
+
 if (-not $SkipKill) {
     Get-Process -Name "Visualization for Hexo" -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Milliseconds 300
 }
 
 if (-not (Get-Command msbuild.exe -ErrorAction SilentlyContinue)) {
-    throw "msbuild.exe not found. Please run in a VS Developer PowerShell or install Visual Studio Build Tools."
+    Write-Host "msbuild.exe not found in PATH. Attempting to load VS developer environment..."
+    $vsPathToTry = $VsDevCmd
+    if (-not $vsPathToTry) { $vsPathToTry = $env:VSDEV_CMD_PATH }
+    if (-not $vsPathToTry) { $vsPathToTry = "D:\Program Files\VScommunity\Common7\Tools\VsDevCmd.bat" }
+
+    if (-not (Import-VsDevEnv $vsPathToTry)) {
+        throw "msbuild.exe not found. Please run in a VS Developer PowerShell or install Visual Studio Build Tools."
+    }
+
+    if (-not (Get-Command msbuild.exe -ErrorAction SilentlyContinue)) {
+        throw "msbuild.exe still not found after loading VS dev env."
+    }
 }
 
 $targets = if ($Clean) { "Clean;Build" } else { "Build" }
@@ -171,9 +211,123 @@ $windeployqt = Find-WinDeployQt
 Write-Host "[package] windeployqt: $windeployqt"
 
 $deployMode = if ($Configuration -match "Debug") { "--debug" } else { "--release" }
-& $windeployqt $deployMode --qmldir $root (Join-Path $packageDir "Visualization for Hexo.exe")
+$windeployqtArgs = @(
+    $deployMode,
+    "--qmldir", $root,
+    "--force",
+    (Join-Path $packageDir "Visualization for Hexo.exe")
+)
+Write-Host "[package] windeployqt args: $($windeployqtArgs -join ' ')"
+& $windeployqt @windeployqtArgs
 if ($LASTEXITCODE -ne 0) {
     throw "windeployqt failed with exit code $LASTEXITCODE"
+}
+
+# Ensure Qt WebEngine resources, locales, and QML are present in the package (defensive copy)
+function Copy-IfExists {
+    param(
+        [string]$src,
+        [string]$dst
+    )
+    if (-not (Test-Path $src)) {
+        return
+    }
+    Write-Host "[package] copying: $src -> $dst"
+    $null = New-Item -ItemType Directory -Path (Split-Path -Parent $dst) -Force
+    try {
+        $srcItem = Get-Item -Path $src
+        if ($srcItem.PSIsContainer -and (Test-Path $dst)) {
+            # Merge directory contents to avoid PowerShell nesting sub-dirs
+            Get-ChildItem -Path $src | ForEach-Object {
+                $childDst = Join-Path $dst $_.Name
+                if ($_.PSIsContainer) {
+                    if (-not (Test-Path $childDst)) {
+                        $null = New-Item -ItemType Directory -Path $childDst -Force
+                    }
+                    robocopy $_.FullName $childDst /E /NFL /NDL /NJH /NJS /NP 2>&1 | Out-Null
+                } else {
+                    Copy-Item -Path $_.FullName -Destination $childDst -Force
+                }
+            }
+        } else {
+            Copy-Item -Path $src -Destination $dst -Recurse -Force
+        }
+    } catch {
+        Write-Warning ([string]::Format("[package] failed to copy {0}: {1}", $src, $_.Exception.Message))
+    }
+}
+
+if ($qtInstallDir) {
+    # qtwebengine locales — copy to both locations that main.cpp searches
+    $srcLocales = Join-Path $qtInstallDir "translations\qtwebengine_locales"
+    Copy-IfExists -src $srcLocales -dst (Join-Path $packageDir "resources\qtwebengine_locales")
+    Copy-IfExists -src $srcLocales -dst (Join-Path $packageDir "translations\qtwebengine_locales")
+
+    # important resources: icudtl, v8 snapshot, qtwebengine pak files
+    $qtResourcesDirCandidates = @(
+        (Join-Path $qtInstallDir "resources"),
+        (Join-Path $qtInstallDir "lib\resources"),
+        (Join-Path $qtInstallDir "lib")
+    )
+
+    $dstResRoot = Join-Path $packageDir "resources"
+    New-Item -ItemType Directory -Path $dstResRoot -Force | Out-Null
+
+    foreach ($cand in $qtResourcesDirCandidates) {
+        if (-not (Test-Path $cand)) { continue }
+        Get-ChildItem -Path $cand -File -Filter "*qtwebengine*.pak" -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-IfExists -src $_.FullName -dst (Join-Path $dstResRoot $_.Name)
+        }
+        Copy-IfExists -src (Join-Path $cand "icudtl.dat") -dst (Join-Path $dstResRoot "icudtl.dat")
+        Copy-IfExists -src (Join-Path $cand "v8_context_snapshot.bin") -dst (Join-Path $dstResRoot "v8_context_snapshot.bin")
+    }
+
+    # Ensure QtWebEngineProcess is present (some setups miss it)
+    $srcWebProc = Join-Path $qtInstallDir "bin\QtWebEngineProcess.exe"
+    Copy-IfExists -src $srcWebProc -dst (Join-Path $packageDir "QtWebEngineProcess.exe")
+}
+
+# NOTE: Project QML files are embedded via qrc:/qt/qml/visualization for hexo/...
+# Do NOT copy them into the package dir — windeployqt creates its own qml/
+# folder for Qt QML plugins, and copying project sources on top can break
+# the plugin layout (PowerShell Copy-Item -Recurse nests into sub-dirs when
+# the destination already exists).
+
+# Copy common MSVC runtime DLLs (vcruntime) into package so app can run without global install
+$vcruntimeNames = @('vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll','msvcp140_1.dll','msvcp140_2.dll')
+$systemDirs = @(
+    (Join-Path $env:windir 'System32'),
+    (Join-Path $env:windir 'SysWOW64')
+)
+
+foreach ($name in $vcruntimeNames) {
+    $found = $false
+    $candidates = @()
+    if ($qtInstallDir) { $candidates += (Join-Path $qtInstallDir "bin\$name") }
+    $candidates += $systemDirs
+    foreach ($cand in $candidates) {
+        $full = if ((Test-Path $cand -PathType Leaf) -and ($cand -like "*\$name")) { $cand } else { Join-Path $cand $name }
+        if (Test-Path $full) {
+            Copy-IfExists -src $full -dst (Join-Path $packageDir $name)
+            $found = $true
+            break
+        }
+    }
+    if (-not $found) {
+        Write-Warning "[package] runtime DLL not found: $name"
+    }
+}
+
+# Ensure vc_redist installer is included (if present in Qt install or system common locations)
+$vcCandidates = @()
+if ($qtInstallDir) { $vcCandidates += (Join-Path $qtInstallDir 'bin\vc_redist.x64.exe') }
+$vcCandidates += (Join-Path $root 'vc_redist.x64.exe')
+$vcCandidates += (Join-Path $repoRoot 'vc_redist.x64.exe')
+foreach ($vc in $vcCandidates) {
+    if (Test-Path $vc) {
+        Copy-IfExists -src $vc -dst (Join-Path $packageDir 'vc_redist.x64.exe')
+        break
+    }
 }
 
 if (Test-Path $zipPath) {

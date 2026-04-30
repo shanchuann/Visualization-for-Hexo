@@ -7,11 +7,23 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QLibraryInfo>
 #include <QTextStream>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QDateTime>
 #include <QQmlError>
 #include <QQuickWindow>
 #include <QColor>
 #include <QScreen>
+// WebEngine custom scheme support
+#include <QWebEngineUrlScheme>
+#include <QWebEngineProfile>
+#include <QWebEngineUrlRequestJob>
+#include <QWebEngineUrlSchemeHandler>
+#include <QMimeDatabase>
+#include <QBuffer>
 
 #ifdef Q_OS_WIN
 #include <Windows.h>
@@ -228,20 +240,148 @@ static void WriteStartupLog(const QStringList &lines)
     }
 }
 
+static void ConfigureWebEngineRuntimePaths()
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QString libexecDir = QLibraryInfo::path(QLibraryInfo::LibraryExecutablesPath);
+    const QString dataDir = QLibraryInfo::path(QLibraryInfo::DataPath);
+    const QString translationDir = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
+
+    auto setEnvIfMissing = [](const char *name, const QString &path) {
+        if (!qEnvironmentVariableIsEmpty(name) || path.isEmpty()) {
+            return;
+        }
+        qputenv(name, QDir::toNativeSeparators(path).toUtf8());
+    };
+
+    auto findFirstExistingFile = [](const QStringList &dirs, const QStringList &names) -> QString {
+        for (const auto &dirPath : dirs) {
+            if (dirPath.isEmpty()) {
+                continue;
+            }
+            for (const auto &name : names) {
+                const QString candidate = QDir(dirPath).filePath(name);
+                if (QFileInfo::exists(candidate)) {
+                    return QDir::cleanPath(candidate);
+                }
+            }
+        }
+        return {};
+    };
+
+    auto findFirstExistingDirectory = [](const QStringList &dirs) -> QString {
+        for (const auto &dirPath : dirs) {
+            if (dirPath.isEmpty()) {
+                continue;
+            }
+            if (QDir(dirPath).exists()) {
+                return QDir::cleanPath(dirPath);
+            }
+        }
+        return {};
+    };
+
+#if defined(QT_DEBUG)
+    const QStringList processNames = {
+        QStringLiteral("QtWebEngineProcessd.exe"),
+        QStringLiteral("QtWebEngineProcess.exe")
+    };
+#else
+    const QStringList processNames = {
+        QStringLiteral("QtWebEngineProcess.exe"),
+        QStringLiteral("QtWebEngineProcessd.exe")
+    };
+#endif
+
+    const QString webEngineProcessPath = findFirstExistingFile({
+        appDir,
+        QDir(appDir).filePath("bin"),
+        QDir(appDir).filePath("libexec"),
+        libexecDir
+    }, processNames);
+    setEnvIfMissing("QTWEBENGINEPROCESS_PATH", webEngineProcessPath);
+
+    QString resourcesPath = findFirstExistingDirectory({
+        QDir(appDir).filePath("resources"),
+        QDir(dataDir).filePath("resources")
+    });
+    if (!resourcesPath.isEmpty()
+        && !QFileInfo::exists(QDir(resourcesPath).filePath("qtwebengine_resources.pak"))) {
+        resourcesPath.clear();
+    }
+    setEnvIfMissing("QTWEBENGINE_RESOURCES_PATH", resourcesPath);
+
+    const QString localesPath = findFirstExistingDirectory({
+        resourcesPath.isEmpty() ? QString() : QDir(resourcesPath).filePath("qtwebengine_locales"),
+        QDir(appDir).filePath("resources/qtwebengine_locales"),
+        QDir(appDir).filePath("translations/qtwebengine_locales"),
+        QDir(translationDir).filePath("qtwebengine_locales"),
+        QDir(dataDir).filePath("translations/qtwebengine_locales")
+    });
+    setEnvIfMissing("QTWEBENGINE_LOCALES_PATH", localesPath);
+}
+
+// Preview scheme handler moved to header to allow proper moc processing
+#include "src/core/PreviewSchemeHandler.h"
+
+
 int main(int argc, char *argv[])
 {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // Register custom 'app' scheme before WebEngine profiles are created.
+    QWebEngineUrlScheme appScheme("app");
+    appScheme.setFlags(QWebEngineUrlScheme::SecureScheme
+                       | QWebEngineUrlScheme::LocalScheme
+                       | QWebEngineUrlScheme::LocalAccessAllowed);
+    appScheme.setSyntax(QWebEngineUrlScheme::Syntax::Path);
+    QWebEngineUrlScheme::registerScheme(appScheme);
+#endif
 #if defined(Q_OS_WIN) && QT_VERSION_CHECK(5, 6, 0) <= QT_VERSION && QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
 #endif
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 
     qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
     qputenv("QSG_RENDER_LOOP", "threaded");
     qputenv("QSG_RHI_BACKEND", "direct3d11");
+    if (qEnvironmentVariableIsEmpty("QTWEBENGINE_CHROMIUM_FLAGS")) {
+        // Improve stability on some Windows GPU drivers for embedded WebEngine previews.
+        qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu");
+    }
 
     QGuiApplication app(argc, argv);
+    ConfigureWebEngineRuntimePaths();
+    // Install a global Qt message handler to capture qDebug/qWarning/qCritical
+    static QMutex _logMutex;
+    auto qtMsgHandler = [](QtMsgType type, const QMessageLogContext &context, const QString &msg){
+        Q_UNUSED(context);
+        QMutexLocker locker(&_logMutex);
+        const QString logPath = QDir(QCoreApplication::applicationDirPath()).filePath("runtime.log");
+        QFile out(logPath);
+        if (out.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QTextStream ts(&out);
+            const QString time = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+            QString level;
+            switch (type) {
+            case QtDebugMsg: level = "DEBUG"; break;
+            case QtInfoMsg: level = "INFO"; break;
+            case QtWarningMsg: level = "WARN"; break;
+            case QtCriticalMsg: level = "CRIT"; break;
+            case QtFatalMsg: level = "FATAL"; break;
+            }
+            ts << time << " [" << level << "] " << msg << "\n";
+            out.close();
+        }
+        if (type == QtFatalMsg) {
+            abort();
+        }
+    };
+    qInstallMessageHandler(qtMsgHandler);
     app.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/visualization for hexo/assets/app-icon.png")));
 
     QQmlApplicationEngine engine;
+    // Install preview scheme handler so QML WebEngineView can load app://preview/*
+    QWebEngineProfile::defaultProfile()->installUrlSchemeHandler("app", new PreviewSchemeHandler(QWebEngineProfile::defaultProfile()));
     AppContext appContext;
     EditorBridge editorBridge;
     QStringList qmlWarnings;

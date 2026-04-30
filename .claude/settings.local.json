@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -File \"./Visualization for Hexo/scripts/build.ps1\")"
+    ]
+  }
+}

@@ -37,13 +37,13 @@
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="QtSettings">
     <QtInstall>6.9.3_msvc2022_64</QtInstall>
-    <QtModules>quick;sql;network;concurrent</QtModules>
+    <QtModules>quick;sql;network;concurrent;webenginecore;webenginequick;webenginewidgets</QtModules>
     <QtBuildConfig>debug</QtBuildConfig>
     <QtQMLDebugEnable>true</QtQMLDebugEnable>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="QtSettings">
     <QtInstall>6.9.3_msvc2022_64</QtInstall>
-    <QtModules>quick;sql;network;concurrent</QtModules>
+    <QtModules>quick;sql;network;concurrent;webenginecore;webenginequick;webenginewidgets</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
   </PropertyGroup>
   <Target Name="QtMsBuildNotFound" BeforeTargets="CustomBuild;ClCompile" Condition="!Exists('$(QtMsBuild)\qt.targets') or !Exists('$(QtMsBuild)\qt.props')">
@@ -110,6 +110,7 @@
     <ClInclude Include="src\core\EditorBridge.h" />
     <ClInclude Include="src\core\GitService.h" />
     <ClInclude Include="src\core\HexoService.h" />
+    <ClInclude Include="src\core\PreviewSchemeHandler.h" />
     <ClInclude Include="src\core\PostService.h" />
     <ClInclude Include="src\models\Post.h" />
     <QtMoc Include="src\adapters\CommandAdapter.h" />
@@ -119,6 +120,8 @@
     <QtMoc Include="src\core\GitService.h" />
     <QtMoc Include="src\core\HexoService.h" />
     <QtMoc Include="src\core\PostService.h" />
+    <QtMoc Include="src\core\PreviewSchemeHandler.h" />
+    
     <QtRcc Include="qml.qrc" />
     <None Include="main.qml" />
   </ItemGroup>

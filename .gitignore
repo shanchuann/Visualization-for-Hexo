@@ -55,3 +55,10 @@ Thumbs.db
 # Local workspace artifacts
 Visualization for Hexo/Visualiz.18A6F1D9/
 .env
+
+# claude
+claude/
+CLAUDE.md
+
+# doc
+Visualization for Hexo说明文档.md

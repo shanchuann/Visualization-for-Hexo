@@ -136,6 +136,9 @@ ApplicationWindow {
     property real uiLineSpacing: 1.95
     property int previewDebounceMs: 320
     property bool consoleVisible: false
+    property bool consoleExpanded: true
+    property var consoleCommandHistory: []
+    property int consoleHistoryIndex: -1
     property int settingsTabIndex: 0
     property int articleViewMode: 1 // 0: source, 1: preview
     property bool resizeDegrade: false
@@ -154,9 +157,8 @@ ApplicationWindow {
         trend: [],
         trendMax: 1
     })
-    property string liveMarkdownText: ""
+    property string previewMarkdownSource: ""
     property string previewCoverSource: ""
-    property int previewRequestId: 0
     property string lastPreviewMarkdown: ""
     property var envStatus: ({ node: false, hexo: false, git: false, project: false })
     property bool envStatusVisible: false
@@ -176,8 +178,8 @@ ApplicationWindow {
     readonly property bool isWindowFullScreen: root.visibility === Window.FullScreen || ((root.windowState & Qt.WindowFullScreen) !== 0)
 
     onConsoleVisibleChanged: {
-        if (consoleVisible && consoleRect) {
-            consoleRect.expanded = true
+        if (consoleVisible) {
+            consoleExpanded = true
         }
     }
 
@@ -374,7 +376,7 @@ ApplicationWindow {
         if (editorContent && editorContent.isMarkdown) {
             previewRenderTimer.restart()
         } else {
-            root.liveMarkdownText = ""
+            root.previewMarkdownSource = ""
         }
     }
 
@@ -402,31 +404,27 @@ ApplicationWindow {
         nextText = nextText.replace(/^\s*\n+/, "")
         if (nextText.trim().length === 0) {
             root.lastPreviewMarkdown = ""
-            root.liveMarkdownText = ""
+            root.previewMarkdownSource = ""
             return
         }
         if (!forceRender && root.lastPreviewMarkdown === nextText) {
             return
         }
         root.lastPreviewMarkdown = nextText
-        root.previewRequestId += 1
-        appContext.renderMarkdownForPreviewAsync(nextText, root.uiBodyFontSize, root.uiLineSpacing, root.previewRequestId)
+        root.previewMarkdownSource = nextText
     }
 
     function toggleConsoleExpanded() {
-        if (!consoleRect) {
-            return;
-        }
         if (!root.consoleVisible) {
             return;
         }
-        consoleRect.expanded = !consoleRect.expanded;
+        root.consoleExpanded = !root.consoleExpanded;
     }
 
     function toggleConsoleVisibility() {
         root.consoleVisible = !root.consoleVisible;
         if (root.consoleVisible) {
-            consoleRect.expanded = true;
+            root.consoleExpanded = true;
         }
     }
 
@@ -497,6 +495,62 @@ ApplicationWindow {
                 border.width: 1
                 border.color: Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.35)
             }
+        }
+    }
+
+    component PageScrollBar: ScrollBar {
+        id: wideSb
+        policy: ScrollBar.AsNeeded
+        minimumSize: 0.08
+        interactive: true
+        hoverEnabled: true
+        width: orientation === Qt.Vertical ? 18 : undefined
+        height: orientation === Qt.Horizontal ? 18 : undefined
+
+        contentItem: Rectangle {
+            implicitWidth: wideSb.orientation === Qt.Vertical ? 14 : wideSb.availableWidth
+            implicitHeight: wideSb.orientation === Qt.Horizontal ? 14 : wideSb.availableHeight
+            radius: 7
+            color: wideSb.pressed
+                ? Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.8)
+                : (wideSb.hovered
+                    ? Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.65)
+                    : Qt.rgba(root.md3Outline.r, root.md3Outline.g, root.md3Outline.b, 0.52))
+        }
+
+        background: Rectangle {
+            implicitWidth: wideSb.orientation === Qt.Vertical ? 14 : wideSb.availableWidth
+            implicitHeight: wideSb.orientation === Qt.Horizontal ? 14 : wideSb.availableHeight
+            radius: 7
+            color: Qt.rgba(root.md3OnSurfaceVariant.r, root.md3OnSurfaceVariant.g, root.md3OnSurfaceVariant.b, 0.12)
+        }
+    }
+
+    component ListScrollBar: ScrollBar {
+        id: listSb
+        policy: ScrollBar.AsNeeded
+        minimumSize: 0.1
+        interactive: true
+        hoverEnabled: true
+        width: orientation === Qt.Vertical ? 6 : undefined
+        height: orientation === Qt.Horizontal ? 6 : undefined
+
+        contentItem: Rectangle {
+            implicitWidth: listSb.orientation === Qt.Vertical ? 3 : listSb.availableWidth
+            implicitHeight: listSb.orientation === Qt.Horizontal ? 3 : listSb.availableHeight
+            radius: 1.5
+            color: listSb.pressed
+                ? Qt.rgba(root.md3Outline.r, root.md3Outline.g, root.md3Outline.b, 0.72)
+                : (listSb.hovered
+                    ? Qt.rgba(root.md3Outline.r, root.md3Outline.g, root.md3Outline.b, 0.58)
+                    : Qt.rgba(root.md3Outline.r, root.md3Outline.g, root.md3Outline.b, 0.42))
+        }
+
+        background: Rectangle {
+            implicitWidth: listSb.orientation === Qt.Vertical ? 3 : listSb.availableWidth
+            implicitHeight: listSb.orientation === Qt.Horizontal ? 3 : listSb.availableHeight
+            radius: 1.5
+            color: "transparent"
         }
     }
 
@@ -692,9 +746,7 @@ ApplicationWindow {
                 spacing: 1
                 boundsBehavior: Flickable.StopAtBounds
                 reuseItems: true
-                ScrollBar.vertical: ScrollBar {
-                    policy: ScrollBar.AsNeeded
-                }
+                ScrollBar.vertical: PageScrollBar {}
             }
         }
 
@@ -1076,7 +1128,7 @@ ApplicationWindow {
             || ((root.windowState & Qt.WindowMaximized) !== 0)
             || ((root.windowState & Qt.WindowFullScreen) !== 0)
         root.refreshConfigRows();
-        root.liveMarkdownText = "";
+        root.previewMarkdownSource = "";
         root.envStatus = appContext.environmentCheck();
         root.diagnosticsText = JSON.stringify(appContext.diagnosticsReport(), null, 2)
         root.refreshTopicStats();
@@ -1328,24 +1380,6 @@ ApplicationWindow {
                     }
                 }
                 
-                IconActionButton {
-                    width: root.topBarButtonSize
-                    height: root.topBarButtonSize
-                    iconSource: root.iconBase + "MeteorIconsSidebar.svg"
-                    toolTipText: "开关左侧文章列表"
-                    onClicked: {
-                        sidebar.visible = !sidebar.visible
-                        sidebar.SplitView.preferredWidth = sidebar.visible ? root.fixedSidebarWidth : 0
-                    }
-                }
-
-                IconActionButton {
-                    width: root.topBarButtonSize
-                    height: root.topBarButtonSize
-                    iconSource: root.iconBase + "TablerLayoutBottombar.svg"
-                    toolTipText: "开关底栏"
-                    onClicked: root.toggleConsoleVisibility()
-                }
             }
         }
 
@@ -1477,6 +1511,7 @@ ApplicationWindow {
                     boundsBehavior: Flickable.StopAtBounds
                     flickDeceleration: 13000
                     maximumFlickVelocity: 6400
+                    ScrollBar.vertical: ListScrollBar {}
 
                     delegate: Item {
                         property var postEntry: modelData || ({})
@@ -1558,6 +1593,7 @@ ApplicationWindow {
                         }
                     }
                 }
+
             }
         }
 
@@ -1586,7 +1622,7 @@ ApplicationWindow {
                         contentHeight: editorContent.implicitHeight + 24
                         boundsBehavior: Flickable.StopAtBounds
                         flickDeceleration: 12000
-                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                        ScrollBar.vertical: PageScrollBar {}
                         ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AlwaysOff }
 
                         Column {
@@ -1782,19 +1818,19 @@ ApplicationWindow {
                                         : 0
                                 }
 
-                                Text {
+                                MarkdownPreview {
                                     id: mdPreview
                                     width: parent.width
-                                    text: root.liveMarkdownText
-                                    textFormat: Text.RichText
-                                    wrapMode: Text.WordWrap
-                                    renderType: Text.NativeRendering
-                                    font.pixelSize: root.uiBodyFontSize
-                                    font.family: "SimSun"
-                                    lineHeight: root.uiLineSpacing
-                                    lineHeightMode: Text.ProportionalHeight
-                                    color: root.readingInk
-                                    onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                                    markdownText: root.previewMarkdownSource
+                                    bodyFontSize: root.uiBodyFontSize
+                                    lineSpacing: root.uiLineSpacing
+                                    onScrollRequested: (deltaY) => {
+                                        if (!editorScrollView) return
+                                        var step = deltaY * 0.5
+                                        var newY = editorScrollView.contentY - step
+                                        var maxY = Math.max(0, editorScrollView.contentHeight - editorScrollView.height)
+                                        editorScrollView.contentY = Math.max(0, Math.min(maxY, newY))
+                                    }
                                 }
                             }
                         }
@@ -1825,257 +1861,24 @@ ApplicationWindow {
                 }
             }
 
-            Connections {
-                target: appContext
-                function onPreviewMarkdownReady(html, requestId) {
-                    if (requestId !== root.previewRequestId) {
-                        return
-                    }
-                    if (root.liveMarkdownText !== html) {
-                        root.liveMarkdownText = html
-                    }
-                }
-            }
+        }
+    }
 
-            // ---- Console ----
-            Rectangle {
-                id: consoleRect
-                visible: root.consoleVisible
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: root.consoleVisible ? (expanded ? consoleExpandedHeight : root.consoleCollapsedHeight) : 0
-                color: root.md3InverseSurface
-                z: 5
-                clip: true
-
-                property bool expanded: false
-                property int consoleExpandedHeight: 280
-                property int consoleMinHeight: 120
-                property int consoleMaxHeight: 600
-                Behavior on height { NumberAnimation { duration: 140 } }
-
-                // ---- Drag handle to resize console ----
-                Rectangle {
-                    anchors.top: parent.top
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    height: 6
-                    color: "transparent"
-                    z: 20
-
-                    // Visual indicator bar
-                    Rectangle {
-                        anchors.centerIn: parent
-                        width: 40
-                        height: 3
-                        radius: 1.5
-                        color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, consoleDragArea.containsMouse ? 0.6 : 0.25)
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                    }
-
-                    MouseArea {
-                        id: consoleDragArea
-                        anchors.fill: parent
-                        anchors.topMargin: -3
-                        anchors.bottomMargin: -3
-                        cursorShape: Qt.SizeVerCursor
-                        hoverEnabled: true
-                        property real startY: 0
-                        property int startHeight: 0
-                        onPressed: function(mouse) {
-                            startY = mapToGlobal(mouse.x, mouse.y).y
-                            startHeight = consoleRect.consoleExpandedHeight
-                        }
-                        onPositionChanged: function(mouse) {
-                            if (pressed) {
-                                var globalY = mapToGlobal(mouse.x, mouse.y).y
-                                var delta = startY - globalY
-                                var newH = Math.max(consoleRect.consoleMinHeight, Math.min(consoleRect.consoleMaxHeight, startHeight + delta))
-                                consoleRect.consoleExpandedHeight = newH
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    id: consoleHeader
-                    anchors.top: parent.top
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    height: 36
-                    color: Qt.darker(root.md3InverseSurface, 1.15)
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 16
-                        anchors.rightMargin: 16
-                        spacing: 8
-
-                        Text {
-                            text: "控制台"
-                            color: root.md3InverseOnSurface
-                            font.pixelSize: 13
-                            font.weight: Font.Medium
-                            opacity: 0.85
-                            Layout.fillWidth: true
-                        }
-
-                        RowLayout {
-                            spacing: 6
-
-                            Text {
-                                text: consoleRect.expanded ? "收起" : "展开"
-                                color: root.md3InverseOnSurface
-                                font.pixelSize: 12
-                                opacity: 0.6
-                            }
-
-                            IconImage {
-                                width: 12
-                                height: 12
-                                source: consoleRect.expanded
-                                    ? "qrc:/qt/qml/visualization for hexo/assets/iconpark/down.svg"
-                                    : "qrc:/qt/qml/visualization for hexo/assets/iconpark/up.svg"
-                                color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.72)
-                            }
-                        }
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleConsoleExpanded()
-                    }
-                }
-
-                ScrollView {
-                    id: logScroll
-                    anchors.top: consoleHeader.bottom
-                    anchors.bottom: consoleInputRow.top
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.margins: 12
-                    clip: true
-                    visible: consoleRect.height > 40
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
-                    ScrollBar.horizontal.policy: ScrollBar.AsNeeded
-
-                    TextArea {
-                        id: logText
-                        readOnly: true
-                        text: appContext.logText
-                        color: root.md3InverseOnSurface
-                        font.family: "Consolas"
-                        font.pixelSize: 13
-                        textFormat: TextEdit.PlainText
-                        wrapMode: TextEdit.NoWrap
-                        selectByMouse: true
-                        selectByKeyboard: true
-                        persistentSelection: true
-                        leftPadding: 0
-                        rightPadding: 0
-                        topPadding: 0
-                        bottomPadding: 0
-                        background: null
-                        opacity: 0.85
-                        onTextChanged: {
-                            Qt.callLater(function() {
-                                if (logScroll.contentItem) {
-                                    logScroll.contentItem.contentY = Math.max(0, logScroll.contentItem.contentHeight - logScroll.contentItem.height);
-                                }
-                            });
-                        }
-                    }
-                }
-
-                Rectangle {
-                    id: consoleInputRow
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    height: 42
-                    color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.03)
-                    border.width: 1
-                    border.color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.16)
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 10
-                        spacing: 8
-
-                        TextField {
-                            id: consoleInputField
-                            Layout.fillWidth: true
-                            placeholderText: "输入命令回车执行；Ctrl+C 中断 · ↑↓ 历史命令"
-                            placeholderTextColor: "#FFFFFF"
-                            color: root.md3InverseOnSurface
-                            selectionColor: Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.45)
-                            selectedTextColor: root.md3OnPrimary
-                            font.family: "Consolas"
-                            font.pixelSize: 12
-                            enabled: root.consoleVisible
-
-                            // Command history (pwsh-like up/down)
-                            property var commandHistory: []
-                            property int historyIndex: -1
-
-                            Keys.onPressed: function(event) {
-                                if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C) {
-                                    appContext.submitConsoleInput("/ctrl+c")
-                                    event.accepted = true
-                                    return
-                                }
-                                if (event.key === Qt.Key_Up) {
-                                    if (commandHistory.length > 0) {
-                                        if (historyIndex < commandHistory.length - 1) {
-                                            historyIndex++
-                                        }
-                                        text = commandHistory[commandHistory.length - 1 - historyIndex]
-                                    }
-                                    event.accepted = true
-                                    return
-                                }
-                                if (event.key === Qt.Key_Down) {
-                                    if (historyIndex > 0) {
-                                        historyIndex--
-                                        text = commandHistory[commandHistory.length - 1 - historyIndex]
-                                    } else {
-                                        historyIndex = -1
-                                        text = ""
-                                    }
-                                    event.accepted = true
-                                    return
-                                }
-                            }
-                            background: Rectangle {
-                                radius: 6
-                                color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.08)
-                                border.width: 1
-                                border.color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.22)
-                            }
-                            onAccepted: {
-                                var cmd = text.trim()
-                                if (cmd.length === 0)
-                                    return
-                                // Record in history (avoid duplicates at end)
-                                if (commandHistory.length === 0 || commandHistory[commandHistory.length - 1] !== cmd) {
-                                    commandHistory.push(cmd)
-                                    // Keep last 100 commands
-                                    if (commandHistory.length > 100) {
-                                        commandHistory.shift()
-                                    }
-                                }
-                                historyIndex = -1
-                                appContext.submitConsoleInput(cmd)
-                                text = ""
-                            }
-                        }
-                    }
-                }
-            }
+    IconActionButton {
+        id: sidebarToggle
+        anchors.left: parent.left
+        anchors.leftMargin: sidebar.visible ? (root.fixedSidebarWidth + 10) : 10
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 24
+        width: root.topBarButtonSize
+        height: root.topBarButtonSize
+        iconSource: root.iconBase + "MeteorIconsSidebar.svg"
+        toolTipText: sidebar.visible ? "收起文章列表" : "展开文章列表"
+        z: 18
+        onClicked: {
+            const nextVisible = !sidebar.visible
+            sidebar.visible = nextVisible
+            sidebar.SplitView.preferredWidth = nextVisible ? root.fixedSidebarWidth : 0
         }
     }
 
@@ -2102,7 +1905,7 @@ ApplicationWindow {
                 boundsBehavior: Flickable.StopAtBounds
                 flickDeceleration: 10000
                 interactive: root.settingsTabIndex !== 1
-                ScrollBar.vertical: ScrollBar {
+                ScrollBar.vertical: PageScrollBar {
                     policy: (root.settingsTabIndex === 1)
                         ? ScrollBar.AlwaysOff
                         : ScrollBar.AsNeeded
@@ -2164,6 +1967,205 @@ ApplicationWindow {
                                 color: root.md3OnSurface
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 64
+                        radius: root.shapeLarge
+                        color: root.md3SurfaceContainerLow
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 14
+                            spacing: 10
+
+                            Text {
+                                text: "控制台"
+                                font.pixelSize: 15
+                                font.weight: Font.Medium
+                                color: root.md3OnSurface
+                                Layout.preferredWidth: 58
+                            }
+
+                            UiButton {
+                                Layout.fillWidth: true
+                                text: root.consoleVisible ? "隐藏控制台" : "显示控制台"
+                                tone: root.consoleVisible ? "outlined" : "tonal"
+                                compact: true
+                                onClicked: root.toggleConsoleVisibility()
+                            }
+
+                            UiButton {
+                                Layout.fillWidth: true
+                                text: root.consoleExpanded ? "收起日志面板" : "展开日志面板"
+                                tone: "outlined"
+                                compact: true
+                                enabled: root.consoleVisible
+                                onClicked: root.toggleConsoleExpanded()
+                            }
+                        }
+                    }
+
+                    UiCard {
+                        visible: root.consoleVisible
+                        Layout.fillWidth: true
+                        implicitHeight: root.consoleExpanded ? 340 : 188
+                        color: root.md3InverseSurface
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            spacing: 8
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 34
+                                radius: root.shapeSmall
+                                color: Qt.darker(root.md3InverseSurface, 1.1)
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 12
+                                    spacing: 8
+
+                                    Text {
+                                        text: "控制台日志"
+                                        color: root.md3InverseOnSurface
+                                        font.pixelSize: 13
+                                        font.weight: Font.Medium
+                                        Layout.fillWidth: true
+                                    }
+
+                                    Text {
+                                        text: root.consoleExpanded ? "已展开" : "已收起"
+                                        color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.72)
+                                        font.pixelSize: 12
+                                    }
+                                }
+                            }
+
+                            ScrollView {
+                                id: settingsConsoleScroll
+                                visible: root.consoleExpanded
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                ScrollBar.vertical: PageScrollBar {}
+                                ScrollBar.horizontal: PageScrollBar {}
+
+                                TextArea {
+                                    id: settingsLogText
+                                    readOnly: true
+                                    text: appContext.logText
+                                    color: root.md3InverseOnSurface
+                                    font.family: "Consolas"
+                                    font.pixelSize: 13
+                                    textFormat: TextEdit.PlainText
+                                    wrapMode: TextEdit.NoWrap
+                                    selectByMouse: true
+                                    selectByKeyboard: true
+                                    persistentSelection: true
+                                    leftPadding: 0
+                                    rightPadding: 0
+                                    topPadding: 0
+                                    bottomPadding: 0
+                                    background: null
+                                    opacity: 0.9
+                                    onTextChanged: {
+                                        Qt.callLater(function() {
+                                            if (settingsConsoleScroll.contentItem) {
+                                                settingsConsoleScroll.contentItem.contentY =
+                                                    Math.max(0, settingsConsoleScroll.contentItem.contentHeight - settingsConsoleScroll.contentItem.height)
+                                            }
+                                        })
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 40
+                                radius: root.shapeSmall
+                                color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.05)
+                                border.width: 1
+                                border.color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.16)
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 8
+
+                                    TextField {
+                                        id: settingsConsoleInput
+                                        Layout.fillWidth: true
+                                        placeholderText: "输入命令回车执行；Ctrl+C 中断 · ↑↓ 历史命令"
+                                        placeholderTextColor: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.62)
+                                        color: root.md3InverseOnSurface
+                                        selectionColor: Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.45)
+                                        selectedTextColor: root.md3OnPrimary
+                                        font.family: "Consolas"
+                                        font.pixelSize: 12
+
+                                        Keys.onPressed: function(event) {
+                                            if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C) {
+                                                appContext.submitConsoleInput("/ctrl+c")
+                                                event.accepted = true
+                                                return
+                                            }
+                                            if (event.key === Qt.Key_Up) {
+                                                if (root.consoleCommandHistory.length > 0) {
+                                                    if (root.consoleHistoryIndex < root.consoleCommandHistory.length - 1) {
+                                                        root.consoleHistoryIndex += 1
+                                                    }
+                                                    text = root.consoleCommandHistory[root.consoleCommandHistory.length - 1 - root.consoleHistoryIndex]
+                                                }
+                                                event.accepted = true
+                                                return
+                                            }
+                                            if (event.key === Qt.Key_Down) {
+                                                if (root.consoleHistoryIndex > 0) {
+                                                    root.consoleHistoryIndex -= 1
+                                                    text = root.consoleCommandHistory[root.consoleCommandHistory.length - 1 - root.consoleHistoryIndex]
+                                                } else {
+                                                    root.consoleHistoryIndex = -1
+                                                    text = ""
+                                                }
+                                                event.accepted = true
+                                                return
+                                            }
+                                        }
+
+                                        background: Rectangle {
+                                            radius: 6
+                                            color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.08)
+                                            border.width: 1
+                                            border.color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.2)
+                                        }
+
+                                        onAccepted: {
+                                            var cmd = text.trim()
+                                            if (cmd.length === 0) {
+                                                return
+                                            }
+                                            if (root.consoleCommandHistory.length === 0
+                                                || root.consoleCommandHistory[root.consoleCommandHistory.length - 1] !== cmd) {
+                                                root.consoleCommandHistory.push(cmd)
+                                                if (root.consoleCommandHistory.length > 100) {
+                                                    root.consoleCommandHistory.shift()
+                                                }
+                                            }
+                                            root.consoleHistoryIndex = -1
+                                            appContext.submitConsoleInput(cmd)
+                                            text = ""
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2460,6 +2462,7 @@ ApplicationWindow {
                                     cacheBuffer: 320
                                     boundsBehavior: Flickable.StopAtBounds
                                     spacing: 6
+                                    ScrollBar.vertical: PageScrollBar {}
                                     delegate: Rectangle {
                                         width: ListView.view.width
                                         height: 56
@@ -3002,7 +3005,7 @@ ApplicationWindow {
 
     Rectangle {
         id: addFab
-        visible: !root.consoleVisible
+        visible: true
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 24

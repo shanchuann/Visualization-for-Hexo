@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QDesktopServices>
 #include <QFile>
 #include <QFileInfo>
@@ -59,7 +60,7 @@ QString buildPreviewHtml(const QString &markdown, int bodyFontPx, qreal lineSpac
     defaultPreviewFont.setFamilies({"PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", "SimSun"});
     defaultPreviewFont.setPixelSize(safeBodyFont);
     doc.setDefaultFont(defaultPreviewFont);
-    doc.setMarkdown(markdown);
+    doc.setMarkdown(markdown, QTextDocument::MarkdownDialectGitHub);
     QString html = doc.toHtml();
 
     // Qt-generated HTML may carry inline pt sizes that override CSS body size.
@@ -68,23 +69,32 @@ QString buildPreviewHtml(const QString &markdown, int bodyFontPx, qreal lineSpac
 
     const QString previewStyle = QStringLiteral(
         "<style>"
-        "body{font-family:'PingFang SC','Microsoft YaHei UI','Noto Sans CJK SC','SimSun',sans-serif;"
-        "font-size:%1px;line-height:%2;color:#2B261B;letter-spacing:0.01em;}"
-        "p,ul,ol,li,td,th{font-size:1em;line-height:%2;margin:0 0 16px 0;}"
-        "h1,h2,h3,h4,h5,h6{font-weight:700;line-height:1.35;color:#1F2A44;margin:26px 0 14px 0;}"
-        "h1{font-size:1.95em;}"
-        "h2{font-size:1.58em;}"
-        "h3{font-size:1.34em;}"
-        "h4{font-size:1.18em;}"
-        "a{color:#1B6EF3;text-decoration:none;}"
+        "body{margin:0;padding:0;font-family:'Segoe UI','PingFang SC','Microsoft YaHei UI','Noto Sans CJK SC',sans-serif;"
+        "font-size:%1px;line-height:%2;color:#24292f;background:transparent;word-wrap:break-word;}"
+        "p{margin:0 0 14px 0;}"
+        "h1,h2,h3,h4,h5,h6{margin:24px 0 14px 0;line-height:1.3;font-weight:600;color:#1f2328;}"
+        "h1{font-size:1.9em;padding-bottom:.3em;border-bottom:1px solid #d8dee4;}"
+        "h2{font-size:1.55em;padding-bottom:.2em;border-bottom:1px solid #d8dee4;}"
+        "h3{font-size:1.3em;}"
+        "h4{font-size:1.12em;}"
+        "h5{font-size:1.02em;}"
+        "h6{font-size:.92em;color:#57606a;}"
+        "a{color:#0969da;text-decoration:none;}"
         "a:hover{text-decoration:underline;}"
-        "img{display:block;margin:12px auto 14px auto;max-width:100%;max-height:340px;height:auto;object-fit:contain;border-radius:6px;}"
-        "pre{margin:14px 0;padding:12px 14px;border-radius:8px;background:#F5F7FC;border:1px solid #E1E6F2;overflow:auto;}"
-        "code{font-family:'Cascadia Mono','Consolas','Courier New',monospace;font-size:1.08em;}"
-        "pre code{font-size:0.97em;line-height:1.7;color:#1E2A44;background:transparent;}"
-        "blockquote{margin:14px 0;padding:10px 14px;border-left:4px solid #B8C2D9;background:#F4F7FF;color:#3A4152;}"
+        "ul,ol{margin:0 0 14px 1.35em;padding:0;}"
+        "li{margin:0.22em 0;}"
+        "hr{border:0;height:1px;background:#d8dee4;margin:22px 0;}"
+        "table{border-collapse:collapse;margin:0 0 16px 0;font-size:.96em;}"
+        "th,td{border:1px solid #d0d7de;padding:6px 13px;}"
+        "th{background:#f6f8fa;font-weight:600;}"
+        "blockquote{margin:0 0 16px 0;padding:0 1em;color:#57606a;border-left:4px solid #d0d7de;}"
         "blockquote p{margin:0 0 8px 0;}"
         "blockquote p:last-child{margin-bottom:0;}"
+        "code{font-family:'Cascadia Mono','JetBrains Mono','Consolas','Courier New',monospace;"
+        "font-size:.92em;padding:.15em .35em;border-radius:6px;background:rgba(175,184,193,.2);color:#1f2328;}"
+        "pre{margin:0 0 16px 0;padding:12px 14px;border-radius:8px;border:1px solid #d0d7de;background:#f6f8fa;overflow:auto;}"
+        "pre code{display:block;background:transparent;padding:0;border-radius:0;line-height:1.55;font-size:.9em;color:#24292f;}"
+        "img{display:block;margin:12px auto;max-width:100%;height:auto;border-radius:6px;}"
         "</style>")
         .arg(bodyFontCss, lineHeightCss);
 
@@ -97,6 +107,69 @@ QString buildPreviewHtml(const QString &markdown, int bodyFontPx, qreal lineSpac
     }
 
     return html;
+}
+
+bool writeFileIfChanged(const QString &targetPath, const QByteArray &content)
+{
+    QFile existing(targetPath);
+    if (existing.open(QIODevice::ReadOnly) && existing.readAll() == content) {
+        return true;
+    }
+
+    const QFileInfo targetInfo(targetPath);
+    if (!QDir().mkpath(targetInfo.absolutePath())) {
+        return false;
+    }
+
+    QFile out(targetPath);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return false;
+    }
+    return out.write(content) == content.size();
+}
+
+bool mirrorResourceTree(const QString &resourceRoot, const QString &targetRoot, QString *error)
+{
+    QDirIterator it(resourceRoot, QDir::Files, QDirIterator::Subdirectories);
+    if (!it.hasNext()) {
+        if (error) {
+            *error = QStringLiteral("resource root has no files: %1").arg(resourceRoot);
+        }
+        return false;
+    }
+
+    const QString normalizedRoot = resourceRoot.endsWith('/')
+        ? resourceRoot
+        : resourceRoot + '/';
+
+    while (it.hasNext()) {
+        const QString sourcePath = it.next();
+        QFile source(sourcePath);
+        if (!source.open(QIODevice::ReadOnly)) {
+            if (error) {
+                *error = QStringLiteral("cannot read resource: %1").arg(sourcePath);
+            }
+            return false;
+        }
+
+        QString relativePath = sourcePath;
+        if (relativePath.startsWith(normalizedRoot)) {
+            relativePath = relativePath.mid(normalizedRoot.size());
+        }
+        if (relativePath.startsWith('/')) {
+            relativePath.remove(0, 1);
+        }
+
+        const QString targetPath = QDir(targetRoot).filePath(relativePath);
+        if (!writeFileIfChanged(targetPath, source.readAll())) {
+            if (error) {
+                *error = QStringLiteral("cannot write runtime asset: %1").arg(targetPath);
+            }
+            return false;
+        }
+    }
+
+    return true;
 }
 
 QString patchSimpleYamlPreserveLayout(const QString &original, const QVariantMap &updates)
@@ -282,6 +355,7 @@ AppContext::AppContext(QObject *parent)
     loadAiConfig();
 
     m_firstRun = !QFileInfo::exists(firstRunFlagPath());
+    ensurePreviewRuntimeAssets();
 }
 
 QString AppContext::currentProjectPath() const { return m_currentProjectPath; }
@@ -337,6 +411,8 @@ QString AppContext::openedPostBody() const { return m_opened.body; }
 QString AppContext::aiProvider() const { return m_aiProvider; }
 QString AppContext::aiApiBase() const { return m_aiApiBase; }
 QString AppContext::aiModel() const { return m_aiModel; }
+QString AppContext::previewRuntimeUrl() const { return m_previewRuntimeUrl; }
+QString AppContext::previewPageHtml() const { return m_previewPageHtml; }
 
 QString AppContext::renderMarkdownForPreview(const QString &markdown,
                                              int bodyFontPx,
@@ -558,7 +634,15 @@ bool AppContext::initializeHexoProject(const QString &path)
 
 #ifdef Q_OS_WIN
     const QString program = "cmd.exe";
-    const QStringList args = {"/C", "hexo", "init", "."};
+    QStringList args;
+    // Prefer plain 'hexo' if available, otherwise use 'npx hexo'
+    int rc = QProcess::execute("where", QStringList() << "hexo");
+    if (rc == 0) {
+        args = {"/C", "hexo init ."};
+    } else {
+        args = {"/C", "npx hexo init ."};
+        appendLog("[WARN] 'hexo' not found in PATH; using 'npx hexo init .' fallback");
+    }
 #else
     const QString program = "/bin/sh";
     const QStringList args = {"-lc", "hexo init ."};
@@ -752,7 +836,7 @@ void AppContext::saveOpenedPost(const QString &title,
         const QString generated = generateDescriptionWithGlm(m_opened.title, m_opened.body);
         if (!generated.isEmpty()) {
             m_opened.description = generated;
-            appendStructuredLog("info", "POST_DESC_GEN", "description generated via GLM-4.7-flash");
+            appendStructuredLog("info", "POST_DESC_GEN", "description generated via DeepSeek");
         }
     }
 
@@ -1143,7 +1227,9 @@ void AppContext::completeFirstRun()
 
 void AppContext::appendStructuredLog(const QString &level, const QString &code, const QString &message)
 {
-    appendLog(QString("[%1][%2] %3").arg(level.toUpper(), code, message));
+    const QString out = QString("[%1][%2] %3").arg(level.toUpper(), code, message);
+    appendLog(out);
+    qDebug().noquote() << "[AppContext]" << out;
 }
 
 QVariantMap AppContext::environmentCheck() const
@@ -1254,6 +1340,31 @@ QString AppContext::firstRunFlagPath() const
 QString AppContext::searchDbPath() const
 {
     return QDir(appDataRoot()).filePath("search_index.sqlite");
+}
+
+void AppContext::ensurePreviewRuntimeAssets()
+{
+    const QString moduleQrcUrl = QStringLiteral("qrc:/preview/index.html");
+    const QString moduleQrcPath = QStringLiteral(":/preview/index.html");
+    if (m_previewRuntimeUrl != moduleQrcUrl) {
+        m_previewRuntimeUrl = moduleQrcUrl;
+        emit previewRuntimeUrlChanged();
+    }
+
+    QFile shell(moduleQrcPath);
+    QString shellHtml;
+    if (shell.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        shellHtml = QString::fromUtf8(shell.readAll());
+    } else {
+        appendStructuredLog("warn",
+                            "PREVIEW_SHELL_READ_FAIL",
+                            QStringLiteral("cannot open preview shell: %1").arg(moduleQrcPath));
+    }
+
+    if (m_previewPageHtml != shellHtml) {
+        m_previewPageHtml = shellHtml;
+        emit previewPageHtmlChanged();
+    }
 }
 
 void AppContext::loadProjectsFromDisk()
@@ -1432,7 +1543,25 @@ void AppContext::runCommand(const QString &commandLine, bool silentIfBusy)
         m_taskRunning = false;
         emit taskRunningChanged();
     }
-    m_command->startShellCommand(m_currentProjectPath, commandLine);
+    QString cmd = commandLine;
+    // If user invoked a hexo command but 'hexo' isn't available in PATH,
+    // prefer using 'npx hexo ...' so local node_modules binaries are used.
+    if (cmd.trimmed().startsWith("hexo", Qt::CaseInsensitive)) {
+        const QString prog = "hexo";
+        int rc = -1;
+#ifdef Q_OS_WIN
+        rc = QProcess::execute("where", QStringList() << prog);
+#else
+        rc = QProcess::execute("which", QStringList() << prog);
+#endif
+        if (rc != 0) {
+            // fallback to npx to run local hexo installs
+            cmd = QStringLiteral("npx %1").arg(commandLine);
+            appendLog("[WARN] 'hexo' not found in PATH; using 'npx' wrapper");
+        }
+    }
+
+    m_command->startShellCommand(m_currentProjectPath, cmd);
 }
 
 void AppContext::setupWatcher()
@@ -1780,7 +1909,10 @@ void AppContext::saveAiConfig() const
 
 QString AppContext::resolveAiApiKey() const
 {
-    QString key = qEnvironmentVariable("GLM_API_KEY");
+    QString key = qEnvironmentVariable("DEEPSEEK_API_KEY");
+    if (key.trimmed().isEmpty()) {
+        key = qEnvironmentVariable("GLM_API_KEY");
+    }
     if (key.trimmed().isEmpty()) {
         key = qEnvironmentVariable("ZHIPUAI_API_KEY");
     }
@@ -1793,6 +1925,7 @@ QString AppContext::resolveAiApiKey() const
     }
 
     const QStringList keys = {
+        QStringLiteral("DEEPSEEK_API_KEY"),
         QStringLiteral("GLM_API_KEY"),
         QStringLiteral("ZHIPUAI_API_KEY"),
         QStringLiteral("OPENAI_API_KEY")
@@ -1817,7 +1950,7 @@ QString AppContext::generateDescriptionWithGlm(const QString &title, const QStri
 {
     const QString apiKey = resolveAiApiKey();
     if (apiKey.isEmpty()) {
-        appendStructuredLog("warn", "AI_KEY_MISSING", "missing GLM API key, skip description generation");
+        appendStructuredLog("warn", "AI_KEY_MISSING", "missing AI API key, skip description generation");
         return {};
     }
 

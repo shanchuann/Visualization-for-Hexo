@@ -18,7 +18,7 @@
 - 文章列表浏览与切换
 - Markdown 编辑与预览联动
 - Front Matter 解析增强（title/date/categories/tags/views/cover/description）
-- 缺失 description 时可自动调用 GLM-4.7-flash 生成摘要
+-- 缺失 description 时可自动调用 DeepSeek（或指定的 AI 提供者）生成摘要
 - Hexo 常用命令集成（构建、发布等）
 - 多博客管理支持
 
@@ -63,15 +63,39 @@ cd Visualization-for-Hexo
 
 > 说明：默认构建配置为 Debug，输出路径为 `Visualization for Hexo\x64\Debug`。你也可以指定 Release 构建（不推荐，Release 目录下，系统不会自动帮你补全依赖，必须用 windeployqt 或 package.ps1 复制 DLL，否则在没有全局 Qt 环境的机器上会缺少 DLL 无法运行。）。
 
-1. GLM 自动描述（可选）
+1. DeepSeek 自动描述（可选）
 
 ```powershell
-$env:ZHIPUAI_API_KEY = "你的 API Key"
+$env:DEEPSEEK_API_KEY = "你的 API Key"
 ```
 
-说明：当文章 front matter 没有 `description` 且正文不为空时，应用会默认调用 `glm-4.7-flash` 自动生成描述并写回文章头。
+说明：当文章 front matter 没有 `description` 且正文不为空时，应用会默认调用配置的 AI 提供者（例如 DeepSeek）自动生成描述并写回文章头。
 
-需要配置相关环境变量（例如 `ZHIPUAI_API_KEY`），并确保 `glm-4.7-flash` 可执行文件在系统 PATH 中。
+需要配置相关环境变量（例如 `DEEPSEEK_API_KEY`），或在设置中配置 `apiBase` 与 `model` 以使用自定义提供者。
+
+## 更改 / 配置 AI 模型（模型选择与 API Key）
+你可以通过下面几种方式切换或配置用于生成描述的 AI 提供者与模型：
+
+- 环境变量（优先级最高）：设置 `DEEPSEEK_API_KEY`。
+	- PowerShell 示例：
+
+```powershell
+$env:DEEPSEEK_API_KEY = "你的 API Key"
+```
+
+	- 也可以在项目根目录或应用运行目录创建 `.env` 文件，内容示例：
+
+```
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx
+```
+
+- 应用内设置：打开 应用 → 设置 → AI（或类似 AI 配置面板），在 UI 中填写 `API 基址(apiBase)`（例如 DeepSeek 的 HTTP endpoint）和 `模型(model)` 字段，保存后生效。某些更改可能需要重启应用。
+
+- 回退与查找顺序说明：应用会优先读取 `DEEPSEEK_API_KEY`，若未找到则依次回退到 `GLM_API_KEY`、`ZHIPUAI_API_KEY`、`OPENAI_API_KEY`，同时会尝试在当前工作目录、应用目录及上级目录查找 `.env` 文件以读取这些变量。
+
+- 测试方法：编辑一篇文章并清空其 `description` 字段，保存时应用会触发自动生成；在应用的日志/控制台（Console）中可查看生成结果与请求状态。
+
+注意：请勿将含有真实 API Key 的 `.env` 文件提交到公开仓库；在共享代码或打包发布时请移除或替换为占位符。
 
 ## 构建与打包
 

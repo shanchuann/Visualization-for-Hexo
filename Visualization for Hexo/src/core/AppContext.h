@@ -37,6 +37,8 @@ class AppContext : public QObject
     Q_PROPERTY(QString aiProvider READ aiProvider WRITE setAiProvider NOTIFY aiProviderChanged)
     Q_PROPERTY(QString aiApiBase READ aiApiBase WRITE setAiApiBase NOTIFY aiApiBaseChanged)
     Q_PROPERTY(QString aiModel READ aiModel WRITE setAiModel NOTIFY aiModelChanged)
+    Q_PROPERTY(QString previewRuntimeUrl READ previewRuntimeUrl NOTIFY previewRuntimeUrlChanged)
+    Q_PROPERTY(QString previewPageHtml READ previewPageHtml NOTIFY previewPageHtmlChanged)
 
 public:
     explicit AppContext(QObject *parent = nullptr);
@@ -66,6 +68,8 @@ public:
     QString aiProvider() const;
     QString aiApiBase() const;
     QString aiModel() const;
+    QString previewRuntimeUrl() const;
+    QString previewPageHtml() const;
 
     void setAutoGenerateEnabled(bool enabled);
     void setPostSortMode(int mode);
@@ -159,6 +163,8 @@ signals:
     void aiProviderChanged();
     void aiApiBaseChanged();
     void aiModelChanged();
+    void previewRuntimeUrlChanged();
+    void previewPageHtmlChanged();
     void previewMarkdownReady(const QString &html, int requestId);
 
 private:
@@ -180,6 +186,7 @@ private:
     QString sessionStateFile() const;
     QString firstRunFlagPath() const;
     QString searchDbPath() const;
+    void ensurePreviewRuntimeAssets();
     void loadProjectsFromDisk();
     void saveProjectsToDisk() const;
     void saveLastOpenedPostState() const;
@@ -233,6 +240,8 @@ private:
     QString m_aiProvider = "none";
     QString m_aiApiBase;
     QString m_aiModel;
+    QString m_previewRuntimeUrl;
+    QString m_previewPageHtml;
     bool m_firstRun = true;
     bool m_pendingPreviewOpen = false;
     bool m_previewOpened = false;
