@@ -160,6 +160,8 @@ Visualization for Hexo/
 
 ## 开发建议
 
+注意：`tools/` 目录包含诊断工具和崩溃转储（`.dmp`）；为了避免提交大型二进制和机器特定产物，项目已将 `tools/dumps/`、`tools/*.dmp`、`tools/*.zip` 和 `tools/procdump*.exe` 等添加到 `.gitignore`。
+
 - 优先使用脚本进行统一构建，避免手动参数不一致
 - 提交前本地执行一次 Debug 构建，确保工程可编译
 - 发布前建议在干净环境做一次解压即运行验证，确认依赖齐全

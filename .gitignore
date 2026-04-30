@@ -62,3 +62,9 @@ CLAUDE.md
 
 # doc
 Visualization for Hexo说明文档.md
+// Tools / diagnostics
+/tools/dumps/
+/tools/*.dmp
+/tools/*.zip
+/tools/procdump*.exe
+/tools/myeasylog.log
