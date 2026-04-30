@@ -1,6 +1,9 @@
 <p align="center">
-	<img src="https://files.seeusercontent.com/2026/03/14/Fqj9/pasted-image-1773481026362.webp" alt="Visualization for Hexo" />
+	<img src="https://files.seeusercontent.com/2026/04/30/Qz7x/Visualization-for-Hexo-1.png" alt="Visualization for Hexo" />
+	
 </p>
+
+<h1 align="center">Hexo 框架博客可视化</h1>
 
 <p align="center">
 	<img src="https://img.shields.io/badge/project-Visualization_for_Hexo-4c566a" alt="project" />
