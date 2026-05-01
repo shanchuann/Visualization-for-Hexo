@@ -19,6 +19,7 @@
 #include <QNetworkRequest>
 #include <QUrl>
 #include <QProcess>
+#include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -353,6 +354,8 @@ AppContext::AppContext(QObject *parent)
 
     loadProjectsFromDisk();
     loadAiConfig();
+    cleanupExpiredTrash();
+    scanTrash();
 
     m_firstRun = !QFileInfo::exists(firstRunFlagPath());
     ensurePreviewRuntimeAssets();
@@ -411,8 +414,10 @@ QString AppContext::openedPostBody() const { return m_opened.body; }
 QString AppContext::aiProvider() const { return m_aiProvider; }
 QString AppContext::aiApiBase() const { return m_aiApiBase; }
 QString AppContext::aiModel() const { return m_aiModel; }
+QString AppContext::aiApiKey() const { return m_aiApiKey; }
 QString AppContext::previewRuntimeUrl() const { return m_previewRuntimeUrl; }
 QString AppContext::previewPageHtml() const { return m_previewPageHtml; }
+QVariantList AppContext::trashItems() const { return m_trashItems; }
 
 QString AppContext::renderMarkdownForPreview(const QString &markdown,
                                              int bodyFontPx,
@@ -492,6 +497,16 @@ void AppContext::setAiModel(const QString &model)
     m_aiModel = model;
     saveAiConfig();
     emit aiModelChanged();
+}
+
+void AppContext::setAiApiKey(const QString &key)
+{
+    if (m_aiApiKey == key) {
+        return;
+    }
+    m_aiApiKey = key;
+    saveAiConfig();
+    emit aiApiKeyChanged();
 }
 
 void AppContext::applyAiSettings(const QString &provider,
@@ -902,8 +917,41 @@ void AppContext::deletePost(const QString &filePath)
         }
     }
 
-    if (f.remove()) {
-        appendLog(QString("[post] deleted: %1").arg(filePath));
+    // Move to trash instead of permanent delete
+    PostData post = readMarkdown(filePath);
+    QString trashDir = trashPath();
+    QDir().mkpath(trashDir);
+
+    QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
+    QString originalFileName = QFileInfo(filePath).fileName();
+    QString trashFileName = QString("%1_%2").arg(timestamp, originalFileName);
+    QString trashFilePath = QDir(trashDir).filePath(trashFileName);
+
+    bool moved = false;
+    if (QFile::rename(filePath, trashFilePath)) {
+        moved = true;
+    } else {
+        // Fallback: copy then remove
+        if (QFile::copy(filePath, trashFilePath) && f.remove()) {
+            moved = true;
+        }
+    }
+
+    if (moved) {
+        QVariantList items = loadTrashIndex();
+        QVariantMap item;
+        item["id"] = QString("%1_%2").arg(timestamp, QString::number(QRandomGenerator::global()->bounded(100000), 36));
+        item["title"] = post.title.isEmpty() ? originalFileName : post.title;
+        item["originalPath"] = filePath;
+        item["trashPath"] = trashFilePath;
+        item["projectPath"] = m_currentProjectPath;
+        item["deletedAt"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+        item["expiresAt"] = QDateTime::currentDateTime().addDays(30).toString(Qt::ISODate);
+        items.append(item);
+        saveTrashIndex(items);
+        scanTrash();
+
+        appendLog(QString("[post] moved to trash: %1").arg(filePath));
         scanPosts();
         rebuildSearchIndex();
 
@@ -1245,7 +1293,16 @@ QVariantMap AppContext::environmentCheck() const
     };
 
     out["node"] = exists("node");
-    out["hexo"] = exists("hexo");
+
+    // Check hexo via npx hexo (modern Node projects use npx instead of global install)
+    int hexoRc = -1;
+#ifdef Q_OS_WIN
+    hexoRc = QProcess::execute("cmd.exe", QStringList() << "/C" << "npx" << "hexo" << "--version");
+#else
+    hexoRc = QProcess::execute("/bin/sh", QStringList() << "-lc" << "npx hexo --version");
+#endif
+    out["hexo"] = (hexoRc == 0);
+
     out["git"] = exists("git");
     out["project"] = !m_currentProjectPath.isEmpty() && isHexoProject(m_currentProjectPath);
     return out;
@@ -1340,6 +1397,70 @@ QString AppContext::firstRunFlagPath() const
 QString AppContext::searchDbPath() const
 {
     return QDir(appDataRoot()).filePath("search_index.sqlite");
+}
+
+QString AppContext::trashPath() const
+{
+    QString path = QDir(appDataRoot()).filePath("trash");
+    QDir().mkpath(path);
+    return path;
+}
+
+QString AppContext::trashIndexPath() const
+{
+    return QDir(appDataRoot()).filePath("trash_index.json");
+}
+
+QVariantList AppContext::loadTrashIndex() const
+{
+    QFile f(trashIndexPath());
+    if (!f.exists() || !f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return QVariantList();
+    }
+    QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    if (!doc.isArray()) {
+        return QVariantList();
+    }
+    return doc.array().toVariantList();
+}
+
+void AppContext::saveTrashIndex(const QVariantList &items) const
+{
+    QJsonArray arr;
+    for (const QVariant &v : items) {
+        arr.append(QJsonObject::fromVariantMap(v.toMap()));
+    }
+    QFile f(trashIndexPath());
+    if (f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        f.write(QJsonDocument(arr).toJson(QJsonDocument::Indented));
+    }
+}
+
+void AppContext::cleanupExpiredTrash()
+{
+    QVariantList items = loadTrashIndex();
+    QVariantList survivors;
+    QDateTime now = QDateTime::currentDateTime();
+    int removedCount = 0;
+
+    for (const QVariant &v : items) {
+        QVariantMap item = v.toMap();
+        QDateTime expiresAt = QDateTime::fromString(item.value("expiresAt").toString(), Qt::ISODate);
+        if (expiresAt.isValid() && expiresAt <= now) {
+            QString trashFile = item.value("trashPath").toString();
+            if (!trashFile.isEmpty() && QFile::exists(trashFile)) {
+                QFile::remove(trashFile);
+            }
+            removedCount++;
+        } else {
+            survivors.append(item);
+        }
+    }
+
+    if (removedCount > 0) {
+        saveTrashIndex(survivors);
+        appendLog(QString("[trash] auto-cleaned %1 expired item(s)").arg(removedCount));
+    }
 }
 
 void AppContext::ensurePreviewRuntimeAssets()
@@ -1892,6 +2013,7 @@ void AppContext::loadAiConfig()
     m_aiProvider = o.value("provider").toString("none");
     m_aiApiBase = o.value("apiBase").toString();
     m_aiModel = o.value("model").toString();
+    m_aiApiKey = o.value("apiKey").toString();
 }
 
 void AppContext::saveAiConfig() const
@@ -1900,6 +2022,7 @@ void AppContext::saveAiConfig() const
     o.insert("provider", m_aiProvider);
     o.insert("apiBase", m_aiApiBase);
     o.insert("model", m_aiModel);
+    o.insert("apiKey", m_aiApiKey);
 
     QFile f(aiConfigPath());
     if (f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
@@ -1909,6 +2032,12 @@ void AppContext::saveAiConfig() const
 
 QString AppContext::resolveAiApiKey() const
 {
+    // 1. Priority: ai_config.json
+    if (!m_aiApiKey.trimmed().isEmpty()) {
+        return m_aiApiKey.trimmed();
+    }
+
+    // 2. Environment variables
     QString key = qEnvironmentVariable("DEEPSEEK_API_KEY");
     if (key.trimmed().isEmpty()) {
         key = qEnvironmentVariable("GLM_API_KEY");
@@ -1946,6 +2075,27 @@ QString AppContext::resolveAiApiKey() const
     return key.trimmed();
 }
 
+static QString detectAiProviderFromEnv()
+{
+    if (!qEnvironmentVariable("DEEPSEEK_API_KEY").trimmed().isEmpty()) return "deepseek";
+    if (!qEnvironmentVariable("GLM_API_KEY").trimmed().isEmpty()) return "glm";
+    if (!qEnvironmentVariable("ZHIPUAI_API_KEY").trimmed().isEmpty()) return "glm";
+    if (!qEnvironmentVariable("OPENAI_API_KEY").trimmed().isEmpty()) return "openai";
+
+    const QStringList candidates = {
+        QDir::current().filePath(".env"),
+        QDir(QCoreApplication::applicationDirPath()).filePath(".env"),
+        QDir(QCoreApplication::applicationDirPath()).filePath("../.env")
+    };
+    for (const QString &envFile : candidates) {
+        if (!readDotEnvValue(envFile, "DEEPSEEK_API_KEY").isEmpty()) return "deepseek";
+        if (!readDotEnvValue(envFile, "GLM_API_KEY").isEmpty()) return "glm";
+        if (!readDotEnvValue(envFile, "ZHIPUAI_API_KEY").isEmpty()) return "glm";
+        if (!readDotEnvValue(envFile, "OPENAI_API_KEY").isEmpty()) return "openai";
+    }
+    return "none";
+}
+
 QString AppContext::generateDescriptionWithGlm(const QString &title, const QString &body)
 {
     const QString apiKey = resolveAiApiKey();
@@ -1959,8 +2109,18 @@ QString AppContext::generateDescriptionWithGlm(const QString &title, const QStri
         promptBody = promptBody.left(1800);
     }
 
+    QString effectiveProvider = m_aiProvider;
+    if (effectiveProvider == "none" || effectiveProvider.isEmpty()) {
+        effectiveProvider = detectAiProviderFromEnv();
+    }
+
+    QString model = m_aiModel.trimmed();
+    if (model.isEmpty()) {
+        model = (effectiveProvider == "deepseek") ? "deepseek-chat" : "glm-4.7-flash";
+    }
+
     QJsonObject payload;
-    payload.insert("model", m_aiModel.trimmed().isEmpty() ? "glm-4.7-flash" : m_aiModel.trimmed());
+    payload.insert("model", model);
     payload.insert("temperature", 0.3);
 
     QJsonArray messages;
@@ -1977,8 +2137,21 @@ QString AppContext::generateDescriptionWithGlm(const QString &title, const QStri
 
     QString apiBase = m_aiApiBase.trimmed();
     if (apiBase.isEmpty()) {
-        apiBase = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+        apiBase = (effectiveProvider == "deepseek")
+                      ? "https://api.deepseek.com/chat/completions"
+                      : "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+    } else if (!apiBase.endsWith("/chat/completions", Qt::CaseInsensitive)) {
+        // OpenAI-compatible base_url support: auto-append endpoint path
+        if (apiBase.endsWith("/")) {
+            apiBase += "chat/completions";
+        } else {
+            apiBase += "/chat/completions";
+        }
     }
+
+    appendStructuredLog("info", "AI_REQUEST_CONFIG",
+                        QString("provider=%1 model=%2 apiBase=%3 keyPrefix=%4")
+                            .arg(effectiveProvider, model, apiBase, apiKey.left(8) + "..."));
 
     QNetworkRequest request{QUrl(apiBase)};
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
@@ -2016,4 +2189,146 @@ QString AppContext::generateDescriptionWithGlm(const QString &title, const QStri
         content = content.left(120).trimmed();
     }
     return content;
+}
+
+void AppContext::scanTrash()
+{
+    cleanupExpiredTrash();
+    QVariantList items = loadTrashIndex();
+    QVariantList filtered;
+    QDateTime now = QDateTime::currentDateTime();
+
+    for (const QVariant &v : items) {
+        QVariantMap item = v.toMap();
+        QString trashFile = item.value("trashPath").toString();
+        if (!QFile::exists(trashFile)) {
+            continue; // skip orphaned entries
+        }
+        QDateTime expiresAt = QDateTime::fromString(item.value("expiresAt").toString(), Qt::ISODate);
+        if (expiresAt.isValid()) {
+            int daysLeft = qMax(0, static_cast<int>(now.daysTo(expiresAt)));
+            item["daysLeft"] = daysLeft;
+        } else {
+            item["daysLeft"] = 0;
+        }
+        filtered.append(item);
+    }
+
+    // Sort by deletedAt desc
+    std::sort(filtered.begin(), filtered.end(), [](const QVariant &a, const QVariant &b) {
+        QString da = a.toMap().value("deletedAt").toString();
+        QString db = b.toMap().value("deletedAt").toString();
+        return da > db;
+    });
+
+    m_trashItems = filtered;
+    emit trashItemsChanged();
+}
+
+void AppContext::restorePost(const QString &trashId)
+{
+    QVariantList items = loadTrashIndex();
+    QVariantMap target;
+    int targetIndex = -1;
+
+    for (int i = 0; i < items.size(); ++i) {
+        QVariantMap item = items[i].toMap();
+        if (item.value("id").toString() == trashId) {
+            target = item;
+            targetIndex = i;
+            break;
+        }
+    }
+
+    if (targetIndex < 0) {
+        appendLog(QString("[trash] restore failed: item %1 not found").arg(trashId));
+        return;
+    }
+
+    QString originalPath = target.value("originalPath").toString();
+    QString trashFilePath = target.value("trashPath").toString();
+
+    if (!QFile::exists(trashFilePath)) {
+        appendLog(QString("[trash] restore failed: trashed file missing %1").arg(trashFilePath));
+        items.removeAt(targetIndex);
+        saveTrashIndex(items);
+        scanTrash();
+        return;
+    }
+
+    // Ensure original directory exists
+    QDir().mkpath(QFileInfo(originalPath).absolutePath());
+
+    // If original path already exists, generate a unique name
+    QString destPath = originalPath;
+    if (QFile::exists(destPath)) {
+        QFileInfo fi(destPath);
+        QString base = fi.completeBaseName();
+        QString suffix = fi.suffix();
+        int counter = 1;
+        do {
+            QString newName = QString("%1_restored_%2.%3").arg(base).arg(counter).arg(suffix);
+            destPath = QDir(fi.absolutePath()).filePath(newName);
+            counter++;
+        } while (QFile::exists(destPath));
+    }
+
+    if (QFile::rename(trashFilePath, destPath)) {
+        items.removeAt(targetIndex);
+        saveTrashIndex(items);
+        scanTrash();
+        scanPosts();
+        rebuildSearchIndex();
+        appendLog(QString("[trash] restored: %1 → %2").arg(trashFilePath, destPath));
+    } else {
+        appendLog(QString("[trash] restore failed: could not move %1 to %2").arg(trashFilePath, destPath));
+    }
+}
+
+void AppContext::permanentlyDeletePost(const QString &trashId)
+{
+    QVariantList items = loadTrashIndex();
+    int targetIndex = -1;
+    QString trashFilePath;
+
+    for (int i = 0; i < items.size(); ++i) {
+        QVariantMap item = items[i].toMap();
+        if (item.value("id").toString() == trashId) {
+            trashFilePath = item.value("trashPath").toString();
+            targetIndex = i;
+            break;
+        }
+    }
+
+    if (targetIndex < 0) {
+        appendLog(QString("[trash] permanent delete failed: item %1 not found").arg(trashId));
+        return;
+    }
+
+    if (!trashFilePath.isEmpty() && QFile::exists(trashFilePath)) {
+        QFile::remove(trashFilePath);
+    }
+
+    items.removeAt(targetIndex);
+    saveTrashIndex(items);
+    scanTrash();
+    appendLog(QString("[trash] permanently deleted: %1").arg(trashId));
+}
+
+void AppContext::emptyTrash()
+{
+    QVariantList items = loadTrashIndex();
+    int removedCount = 0;
+
+    for (const QVariant &v : items) {
+        QString trashFile = v.toMap().value("trashPath").toString();
+        if (!trashFile.isEmpty() && QFile::exists(trashFile)) {
+            QFile::remove(trashFile);
+        }
+        removedCount++;
+    }
+
+    saveTrashIndex(QVariantList());
+    scanTrash();
+    appendLog(QString("[trash] emptied: %1 item(s) removed").arg(removedCount));
 }

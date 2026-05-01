@@ -23,6 +23,8 @@ Item {
     property string lastPushedMarkdown: ""
     property int lastPushedFontPx: -1
     property real lastPushedLineSpacing: -1
+    property bool switching: false
+    property string pendingFullSource: ""
     implicitHeight: estimatedHeight
     signal scrollRequested(int deltaY)
 
@@ -35,6 +37,18 @@ Item {
         root.lastPushedMarkdown = ""
         root.lastPushedFontPx = -1
         root.lastPushedLineSpacing = -1
+        root.pendingFullSource = ""
+    }
+
+    function beginContentSwitch() {
+        const source = root.markdownText || ""
+        if (source.length === 0) {
+            root.switching = false
+            renderCompleteChecker.stopChecking()
+            return
+        }
+        root.switching = true
+        renderCompleteChecker.stopChecking()
     }
 
     function pushMarkdown() {
@@ -54,21 +68,49 @@ Item {
         if (source === root.lastPushedMarkdown
             && fontPx === root.lastPushedFontPx
             && Math.abs(lineHeight - root.lastPushedLineSpacing) < 0.001) {
+            root.switching = false
             return
         }
 
-        root.lastPushedMarkdown = source
+        // Staged loading: push first part for long articles, then full content after render
+        var pushSource = source
+        if (source.length > 3000 && root.pendingFullSource.length === 0) {
+            var cutAt = source.lastIndexOf('\n\n', 2500)
+            if (cutAt < 1500) cutAt = source.lastIndexOf('\n', 2500)
+            if (cutAt < 1500) cutAt = 2500
+            root.pendingFullSource = source
+            pushSource = source.substring(0, cutAt) + "\n\n*(剩余内容加载中...)*"
+        } else {
+            root.pendingFullSource = ""
+        }
+
+        root.lastPushedMarkdown = pushSource
         root.lastPushedFontPx = fontPx
         root.lastPushedLineSpacing = lineHeight
 
+        doPushContent(pushSource, fontPx, lineHeight, root.pendingFullSource.length > 0)
+    }
+
+    function doPushContent(source, fontPx, lineHeight, isPartial) {
         const payload = JSON.stringify(source)
-        // Also log the payload length into the page console so DevTools can capture it
         const js = "(function(){ var p = " + payload + "; try{ console.log('[HexoBridge] PUSH payload_len=' + (p && p.length ? p.length : 0)); }catch(e){} var cssId='__hexo_hide_scrollbar__'; if(!document.getElementById(cssId)){ try{ var s=document.createElement('style'); s.id=cssId; s.textContent='html,body{height:auto;margin:0;padding:0;overflow:hidden;min-height:auto;} body{scrollbar-width:none;-ms-overflow-style:none;} body::-webkit-scrollbar{width:0;height:0;background:transparent;}'; document.head.appendChild(s);}catch(_){/* ignore */} } if(typeof window.updateMarkdown === 'function'){ window.updateMarkdown(p, { bodyFontSize: " + fontPx + ", lineSpacing: " + lineHeight + " }); return true; } return false; })();"
         previewWeb.runJavaScript(js, function(ok) {
             root.bridgeActive = !!ok
             if (ok) {
                 heightProbeTimer.restart()
                 delayedHeightProbeTimer.restart()
+                // Immediately probe height so checker can finish faster on cache hits
+                previewWeb.runJavaScript(
+                    "(function(){ return Math.max(document.documentElement.scrollHeight || 0, document.body.scrollHeight || 0); })();",
+                    function(initialH) {
+                        if (initialH && initialH > 0) {
+                            root.estimatedHeight = Math.max(520, initialH + 24)
+                        }
+                        renderCompleteChecker.startChecking(isPartial, initialH)
+                    }
+                )
+            } else {
+                switchGuard.restart()
             }
         })
     }
@@ -205,7 +247,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            visible: !root.pageReady || root.loadFailed
+            visible: root.loadFailed
             color: "#FFFFFF"
 
             Column {
@@ -217,7 +259,7 @@ Item {
 
                 Text {
                     width: parent.width
-                    text: root.loadFailed ? "升级版 Markdown 预览暂时不可用" : "升级版 Markdown 预览加载中..."
+                    text: "升级版 Markdown 预览暂时不可用"
                     font.pixelSize: 18
                     font.weight: Font.DemiBold
                     color: "#1f2328"
@@ -226,7 +268,7 @@ Item {
 
                 Text {
                     width: parent.width
-                    text: root.loadFailed ? root.loadError : "正在启动 VSCode 风格渲染引擎"
+                    text: root.loadError
                     wrapMode: Text.Wrap
                     font.pixelSize: 13
                     color: "#57606a"
@@ -234,7 +276,6 @@ Item {
                 }
 
                 Rectangle {
-                    visible: root.loadFailed
                     width: 120
                     height: 34
                     radius: 17
@@ -271,13 +312,124 @@ Item {
                 }
             }
         }
+
+        Rectangle {
+            id: blurOverlay
+            anchors.fill: parent
+            color: "#E6FFFFFF"
+            opacity: root.switching ? 1 : 0
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 14
+
+                Rectangle {
+                    id: spinner
+                    width: 36
+                    height: 36
+                    radius: 18
+                    color: "transparent"
+                    border.width: 3
+                    border.color: "#1B6EF3"
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    NumberAnimation on rotation {
+                        from: 0
+                        to: 360
+                        duration: 900
+                        loops: Animation.Infinite
+                        running: blurOverlay.visible
+                    }
+                }
+
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "预览加载中..."
+                    color: "#57606a"
+                    font.pixelSize: 14
+                }
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                enabled: root.switching
+            }
+        }
     }
 
     Timer {
         id: renderDebounce
-        interval: 100
+        interval: 10
         repeat: false
         onTriggered: root.pushMarkdown()
+    }
+
+    Timer {
+        id: renderCompleteChecker
+        property int lastHeight: -1
+        property int stableCount: 0
+        property bool checkerRunning: false
+        property bool waitingForPartial: false
+        interval: 50
+        repeat: true
+        onTriggered: {
+            if (!checkerRunning) return
+            previewWeb.runJavaScript(
+                "(function(){ return Math.max(document.documentElement.scrollHeight || 0, document.body.scrollHeight || 0); })();",
+                function(h) {
+                    if (!checkerRunning) return
+                    if (h && h > 0) {
+                        if (Math.abs(h - lastHeight) <= 2) {
+                            stableCount++
+                            if (stableCount >= 2) {
+                                root.estimatedHeight = Math.max(520, h + 24)
+                                if (waitingForPartial && root.pendingFullSource.length > 0) {
+                                    // Partial render complete; now push full content
+                                    waitingForPartial = false
+                                    lastHeight = -1
+                                    stableCount = 0
+                                    var full = root.pendingFullSource
+                                    root.pendingFullSource = ""
+                                    root.lastPushedMarkdown = full
+                                    var fontPx = root.lastPushedFontPx
+                                    var lineHeight = root.lastPushedLineSpacing
+                                    var payload = JSON.stringify(full)
+                                    var js = "(function(){ var p = " + payload + "; if(typeof window.updateMarkdown === 'function'){ window.updateMarkdown(p, { bodyFontSize: " + fontPx + ", lineSpacing: " + lineHeight + " }); return true; } return false; })();"
+                                    previewWeb.runJavaScript(js, function(ok) {
+                                        root.bridgeActive = !!ok
+                                        if (ok) {
+                                            heightProbeTimer.restart()
+                                            delayedHeightProbeTimer.restart()
+                                            renderCompleteChecker.startChecking(false)
+                                        }
+                                    })
+                                } else {
+                                    // Fully rendered; clear blur
+                                    root.switching = false
+                                    checkerRunning = false
+                                    renderCompleteChecker.stop()
+                                }
+                            }
+                        } else {
+                            stableCount = 0
+                            lastHeight = h
+                        }
+                    }
+                }
+            )
+        }
+        function startChecking(partial, initialHeight) {
+            lastHeight = (initialHeight !== undefined && initialHeight > 0) ? initialHeight : -1
+            stableCount = 0
+            waitingForPartial = partial
+            checkerRunning = true
+            renderCompleteChecker.restart()
+        }
+        function stopChecking() {
+            checkerRunning = false
+            renderCompleteChecker.stop()
+        }
     }
 
     Timer {
@@ -289,7 +441,7 @@ Item {
 
     Timer {
         id: heightProbeTimer
-        interval: 80
+        interval: 30
         repeat: false
         onTriggered: {
             previewWeb.runJavaScript(
@@ -304,7 +456,7 @@ Item {
 
     Timer {
         id: delayedHeightProbeTimer
-        interval: 600
+        interval: 250
         repeat: false
         onTriggered: {
             previewWeb.runJavaScript(

@@ -37,8 +37,10 @@ class AppContext : public QObject
     Q_PROPERTY(QString aiProvider READ aiProvider WRITE setAiProvider NOTIFY aiProviderChanged)
     Q_PROPERTY(QString aiApiBase READ aiApiBase WRITE setAiApiBase NOTIFY aiApiBaseChanged)
     Q_PROPERTY(QString aiModel READ aiModel WRITE setAiModel NOTIFY aiModelChanged)
+    Q_PROPERTY(QString aiApiKey READ aiApiKey WRITE setAiApiKey NOTIFY aiApiKeyChanged)
     Q_PROPERTY(QString previewRuntimeUrl READ previewRuntimeUrl NOTIFY previewRuntimeUrlChanged)
     Q_PROPERTY(QString previewPageHtml READ previewPageHtml NOTIFY previewPageHtmlChanged)
+    Q_PROPERTY(QVariantList trashItems READ trashItems NOTIFY trashItemsChanged)
 
 public:
     explicit AppContext(QObject *parent = nullptr);
@@ -68,14 +70,17 @@ public:
     QString aiProvider() const;
     QString aiApiBase() const;
     QString aiModel() const;
+    QString aiApiKey() const;
     QString previewRuntimeUrl() const;
     QString previewPageHtml() const;
+    QVariantList trashItems() const;
 
     void setAutoGenerateEnabled(bool enabled);
     void setPostSortMode(int mode);
     void setAiProvider(const QString &provider);
     void setAiApiBase(const QString &apiBase);
     void setAiModel(const QString &model);
+    void setAiApiKey(const QString &key);
 
     Q_INVOKABLE void addProject(const QString &path);
     Q_INVOKABLE void switchProject(const QString &path);
@@ -145,6 +150,10 @@ public:
     Q_INVOKABLE void applyAiSettings(const QString &provider,
                                      const QString &apiBase,
                                      const QString &model);
+    Q_INVOKABLE void restorePost(const QString &trashId);
+    Q_INVOKABLE void permanentlyDeletePost(const QString &trashId);
+    Q_INVOKABLE void emptyTrash();
+    Q_INVOKABLE void scanTrash();
 
 signals:
     void currentProjectPathChanged();
@@ -163,9 +172,11 @@ signals:
     void aiProviderChanged();
     void aiApiBaseChanged();
     void aiModelChanged();
+    void aiApiKeyChanged();
     void previewRuntimeUrlChanged();
     void previewPageHtmlChanged();
     void previewMarkdownReady(const QString &html, int requestId);
+    void trashItemsChanged();
 
 private:
     struct PostData {
@@ -218,6 +229,12 @@ private:
     QString generateDescriptionWithGlm(const QString &title, const QString &body);
     QString resolveAiApiKey() const;
 
+    QString trashPath() const;
+    QString trashIndexPath() const;
+    QVariantList loadTrashIndex() const;
+    void saveTrashIndex(const QVariantList &items) const;
+    void cleanupExpiredTrash();
+
 private:
     CommandAdapter *m_command;
     QNetworkAccessManager *m_network;
@@ -240,10 +257,12 @@ private:
     QString m_aiProvider = "none";
     QString m_aiApiBase;
     QString m_aiModel;
+    QString m_aiApiKey;
     QString m_previewRuntimeUrl;
     QString m_previewPageHtml;
     bool m_firstRun = true;
     bool m_pendingPreviewOpen = false;
     bool m_previewOpened = false;
     QString m_lastPreviewUrl;
+    QVariantList m_trashItems;
 };

@@ -24,19 +24,19 @@ QString HexoService::workingDirectory() const
     return m_workingDirectory;
 }
 
-void HexoService::generate() { run("hexo generate"); }
-void HexoService::deploy() { run("hexo deploy"); }
-void HexoService::clean() { run("hexo clean"); }
-void HexoService::server() { run("hexo server"); }
+void HexoService::generate() { run("npx hexo generate"); }
+void HexoService::deploy() { run("npx hexo deploy"); }
+void HexoService::clean() { run("npx hexo clean"); }
+void HexoService::server() { run("npx hexo server"); }
 
 void HexoService::newPost(const QString &title)
 {
-    run(QString("hexo new post \"%1\"").arg(title));
+    run(QString("npx hexo new post \"%1\"").arg(title));
 }
 
 void HexoService::newPage(const QString &title)
 {
-    run(QString("hexo new page \"%1\"").arg(title));
+    run(QString("npx hexo new page \"%1\"").arg(title));
 }
 
 void HexoService::run(const QString &commandLine)

@@ -34,6 +34,11 @@ ApplicationWindow {
     title: "Visualization for Hexo"
     flags: Qt.Window | Qt.FramelessWindowHint
     color: layoutBg
+    onClosing: {
+        if (autoSaveTimer.running) {
+            root.doAutoSave()
+        }
+    }
 
     function toFileUrl(pathText) {
         var text = (pathText || "").trim()
@@ -73,6 +78,15 @@ ApplicationWindow {
             projectFolderDialog.selectedFolder = presetUrl
         }
         projectFolderDialog.open()
+    }
+
+    function showConfirmDialog(title, message, confirmText, isDanger, callback) {
+        root.confirmDialogTitle = title
+        root.confirmDialogMessage = message
+        root.confirmDialogConfirmText = confirmText
+        root.confirmDialogIsDanger = isDanger
+        root.pendingConfirmCallback = callback
+        confirmDialog.open()
     }
 
     Rectangle {
@@ -137,6 +151,7 @@ ApplicationWindow {
     property int previewDebounceMs: 320
     property bool consoleVisible: false
     property bool consoleExpanded: true
+    property bool aiKeyEditing: false
     property var consoleCommandHistory: []
     property int consoleHistoryIndex: -1
     property int settingsTabIndex: 0
@@ -160,6 +175,8 @@ ApplicationWindow {
     property string previewMarkdownSource: ""
     property string previewCoverSource: ""
     property string lastPreviewMarkdown: ""
+    property bool autoSaveEnabled: true
+    property string autoSaveStatus: ""
     property var envStatus: ({ node: false, hexo: false, git: false, project: false })
     property bool envStatusVisible: false
     property string pendingInitProjectPath: ""
@@ -167,6 +184,11 @@ ApplicationWindow {
     property string initProjectStatus: ""
     property string pendingDeleteProjectPath: ""
     property string pendingDeleteProjectName: ""
+    property var pendingConfirmCallback: null
+    property string confirmDialogTitle: ""
+    property string confirmDialogMessage: ""
+    property string confirmDialogConfirmText: "确认"
+    property bool confirmDialogIsDanger: false
     property real normalWindowX: 0
     property real normalWindowY: 0
     property real normalWindowWidth: width
@@ -366,6 +388,7 @@ ApplicationWindow {
             return
         }
         root.lastPreviewMarkdown = ""
+        root.autoSaveEnabled = false
         titleInput.text = Qt.binding(function() { return appContext.openedPostTitle })
         categoryInput.editText = Qt.binding(function() { return appContext.openedPostCategory })
         tagsInput.editText = Qt.binding(function() { return appContext.openedPostTags })
@@ -378,6 +401,28 @@ ApplicationWindow {
         } else {
             root.previewMarkdownSource = ""
         }
+        Qt.callLater(function() { root.autoSaveEnabled = true })
+    }
+
+    function triggerAutoSave() {
+        if (!root.autoSaveEnabled) return
+        if (!appContext.openedPostPath || appContext.openedPostPath.length === 0) return
+        autoSaveTimer.restart()
+    }
+
+    function doAutoSave() {
+        if (!appContext.openedPostPath || appContext.openedPostPath.length === 0) return
+        appContext.saveOpenedPost(
+            titleInput.text,
+            categoryInput.editText,
+            tagsInput.editText,
+            dateInput.editText,
+            coverInput.text,
+            descriptionInput.text,
+            bodyEdit.text
+        )
+        root.autoSaveStatus = "已保存"
+        autoSaveStatusFade.restart()
     }
 
     function requestDeleteProject(name, path) {
@@ -603,7 +648,7 @@ ApplicationWindow {
                 }
                 if (uiBtn.tone === "text") {
                     if (uiBtn.danger) {
-                        return uiBtn.hovered ? Qt.rgba(root.md3Error.r, root.md3Error.g, root.md3Error.b, 0.12) : "transparent";
+                        return uiBtn.hovered ? Qt.rgba(root.md3Error.r, root.md3Error.g, root.md3Error.b, 0.22) : "transparent";
                     }
                     return uiBtn.hovered ? root.hoverOverlay(true) : "transparent";
                 }
@@ -1097,7 +1142,12 @@ ApplicationWindow {
         };
     }
 
-    onSettingsTabIndexChanged: root.refreshConfigRows()
+    onSettingsTabIndexChanged: {
+        root.refreshConfigRows()
+        if (root.settingsTabIndex === 4) {
+            appContext.scanTrash()
+        }
+    }
 
     Connections {
         target: appContext
@@ -1201,6 +1251,20 @@ ApplicationWindow {
         onTriggered: {
             root.forceMainLayoutSync()
         }
+    }
+
+    Timer {
+        id: autoSaveTimer
+        interval: 2000
+        repeat: false
+        onTriggered: root.doAutoSave()
+    }
+
+    Timer {
+        id: autoSaveStatusFade
+        interval: 2000
+        repeat: false
+        onTriggered: root.autoSaveStatus = ""
     }
 
     // ======================== MD3 Top App Bar ========================
@@ -1351,17 +1415,25 @@ ApplicationWindow {
                     implicitWidth: 72
                     implicitHeight: root.topBarButtonSize
                     onClicked: {
-                        root.consoleVisible = true
-                        appContext.appendStructuredLog("info", "DEPLOY_CLICK", "requested: hexo deploy")
                         if (!appContext.currentProjectPath || appContext.currentProjectPath.length === 0) {
                             appContext.appendStructuredLog("warn", "DEPLOY_NO_PROJECT", "请先选择 Hexo 项目后再发布")
                             return
                         }
-                        var env = appContext.environmentCheck()
-                        if (!env.hexo || !env.git) {
-                            appContext.appendStructuredLog("warn", "DEPLOY_ENV", "发布依赖 hexo 和 git，请检查环境")
-                        }
-                        appContext.runHexoDeploy()
+                        root.showConfirmDialog(
+                            "发布站点",
+                            "确定要执行 hexo deploy 吗？这将把当前站点发布到线上。",
+                            "发布",
+                            false,
+                            function() {
+                                root.consoleVisible = true
+                                appContext.appendStructuredLog("info", "DEPLOY_CLICK", "requested: hexo deploy")
+                                var env = appContext.environmentCheck()
+                                if (!env.hexo || !env.git) {
+                                    appContext.appendStructuredLog("warn", "DEPLOY_ENV", "发布依赖 hexo 和 git，请检查环境")
+                                }
+                                appContext.runHexoDeploy()
+                            }
+                        )
                     }
                 }
 
@@ -1518,76 +1590,106 @@ ApplicationWindow {
                         width: ListView.view.width
                         height: 86
 
-                        Rectangle {
-                            id: postItemBg
+                        MouseArea {
+                            id: postMouse
                             anchors.fill: parent
-                            anchors.leftMargin: 12
-                            anchors.rightMargin: 12
-                            anchors.topMargin: 4
-                            anchors.bottomMargin: 4
-                            radius: root.shapeMedium
-
-                            color: {
-                                if (postEntry.path && postEntry.path === appContext.openedPostPath) return root.sidePanelItem
-                                if (postMouse.containsMouse) return Qt.rgba(root.md3OnSurface.r, root.md3OnSurface.g, root.md3OnSurface.b, 0.05)
-                                return "transparent"
-                            }
-
-                            MouseArea {
-                                id: postMouse
-                                anchors.fill: parent
-                                hoverEnabled: !root.resizeDegrade
-                                onClicked: {
-                                    if (postEntry.path) {
-                                        appContext.openPost(postEntry.path)
-                                    }
+                            hoverEnabled: !root.resizeDegrade
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            onClicked: {
+                                if (postEntry.path) {
+                                    appContext.openPost(postEntry.path)
                                 }
-                                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                onPressAndHold: {
-                                    if (postEntry.path) {
-                                        appContext.deletePost(postEntry.path)
-                                    }
+                            }
+                            onPressAndHold: {
+                                if (postEntry.path) {
+                                    var postPath = postEntry.path
+                                    var postTitle = postEntry.title || ""
+                                    root.showConfirmDialog(
+                                        "删除文章",
+                                        "确定要删除文章「" + postTitle + "」吗？删除后可在回收站中恢复。",
+                                        "删除",
+                                        true,
+                                        function() { appContext.deletePost(postPath) }
+                                    )
                                 }
                             }
 
-                            Item {
+                            Rectangle {
+                                id: postItemBg
                                 anchors.fill: parent
-                                anchors.margins: 14
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                anchors.topMargin: 4
+                                anchors.bottomMargin: 4
+                                radius: root.shapeMedium
 
-                                Text {
-                                    id: postTitle
-                                    anchors.top: parent.top
-                                    anchors.left: parent.left
-                                    anchors.right: deleteBtn.visible ? deleteBtn.left : parent.right
-                                    anchors.rightMargin: deleteBtn.visible ? 8 : 0
-                                    text: postEntry.title || ""
-                                    font.pixelSize: 15
-                                    font.weight: postEntry.path === appContext.openedPostPath ? Font.DemiBold : Font.Normal
-                                    color: root.md3OnSurface
-                                    elide: Text.ElideRight
+                                color: {
+                                    if (postEntry.path && postEntry.path === appContext.openedPostPath) return root.sidePanelItem
+                                    if (postMouse.containsMouse) return Qt.rgba(root.md3OnSurface.r, root.md3OnSurface.g, root.md3OnSurface.b, 0.05)
+                                    return "transparent"
                                 }
+                                Behavior on color { ColorAnimation { duration: 100 } }
 
-                                UiButton {
-                                    id: deleteBtn
-                                    anchors.top: parent.top
-                                    anchors.right: parent.right
-                                    anchors.topMargin: -4
-                                    text: "删除"
-                                    tone: "text"
-                                    danger: true
-                                    compact: true
-                                    visible: !!postEntry.path && (postMouse.containsMouse || (postEntry.path === appContext.openedPostPath))
-                                    onClicked: appContext.deletePost(postEntry.path)
-                                }
+                                Item {
+                                    anchors.fill: parent
+                                    anchors.margins: 14
 
-                                Text {
-                                    anchors.bottom: parent.bottom
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    text: (postEntry.date || "") + (postEntry.category ? " · " + postEntry.category : "")
-                                    font.pixelSize: 13
-                                    color: root.md3OnSurfaceVariant
-                                    elide: Text.ElideRight
+                                    Text {
+                                        id: postTitle
+                                        anchors.top: parent.top
+                                        anchors.left: parent.left
+                                        anchors.right: deleteBtnContainer.left
+                                        anchors.rightMargin: 8
+                                        text: postEntry.title || ""
+                                        font.pixelSize: 15
+                                        font.weight: postEntry.path === appContext.openedPostPath ? Font.DemiBold : Font.Normal
+                                        color: root.md3OnSurface
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Item {
+                                        id: deleteBtnContainer
+                                        anchors.top: parent.top
+                                        anchors.topMargin: -4
+                                        anchors.right: parent.right
+                                        width: 44
+                                        height: 32
+
+                                        UiButton {
+                                            id: deleteBtn
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "删除"
+                                            tone: "text"
+                                            danger: true
+                                            compact: true
+                                            visible: !!postEntry.path
+                                            opacity: (postMouse.containsMouse || (postEntry.path === appContext.openedPostPath)) ? 1 : 0
+                                            enabled: opacity > 0.5
+                                            Behavior on opacity { NumberAnimation { duration: 100 } }
+                                            onClicked: {
+                                                var postPath = postEntry.path
+                                                var postTitle = postEntry.title || ""
+                                                root.showConfirmDialog(
+                                                    "删除文章",
+                                                    "确定要删除文章「" + postTitle + "」吗？删除后可在回收站中恢复。",
+                                                    "删除",
+                                                    true,
+                                                    function() { appContext.deletePost(postPath) }
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        anchors.bottom: parent.bottom
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        text: (postEntry.date || "") + (postEntry.category ? " · " + postEntry.category : "")
+                                        font.pixelSize: 13
+                                        color: root.md3OnSurfaceVariant
+                                        elide: Text.ElideRight
+                                    }
                                 }
                             }
                         }
@@ -1612,6 +1714,17 @@ ApplicationWindow {
                     id: editorViewport
                     anchors.fill: parent
                     clip: true
+
+                    Text {
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.margins: 8
+                        text: root.autoSaveStatus
+                        font.pixelSize: 11
+                        color: root.md3OnSurfaceVariant
+                        opacity: root.autoSaveStatus.length > 0 ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 200 } }
+                    }
 
                     Flickable {
                         id: editorScrollView
@@ -1644,7 +1757,7 @@ ApplicationWindow {
                             text: appContext.openedPostTitle
                             wrapMode: TextInput.Wrap
                             selectByMouse: true
-                            
+                            onTextChanged: root.triggerAutoSave()
                         }
 
                         // Metadata card
@@ -1680,6 +1793,7 @@ ApplicationWindow {
                                         editText: appContext.openedPostCategory
                                         Layout.fillWidth: true
                                         Layout.preferredWidth: 0
+                                        onEditTextChanged: root.triggerAutoSave()
                                     }
 
                                     Text {
@@ -1697,6 +1811,7 @@ ApplicationWindow {
                                         editText: appContext.openedPostTags
                                         Layout.fillWidth: true
                                         Layout.preferredWidth: 0
+                                        onEditTextChanged: root.triggerAutoSave()
                                     }
 
                                     Text {
@@ -1719,6 +1834,7 @@ ApplicationWindow {
                                         }
                                         Layout.fillWidth: true
                                         Layout.preferredWidth: 0
+                                        onEditTextChanged: root.triggerAutoSave()
                                     }
                                 }
 
@@ -1736,6 +1852,7 @@ ApplicationWindow {
                                             if (editorContent && editorContent.isMarkdown && !root.degradeRendering) {
                                                 previewRenderTimer.restart()
                                             }
+                                            root.triggerAutoSave()
                                         }
                                     }
                                     UiButton {
@@ -1755,6 +1872,7 @@ ApplicationWindow {
                                         Layout.fillWidth: true
                                         text: appContext.openedPostDescription
                                         placeholderText: "文章摘要（为空时保存将自动生成）"
+                                        onTextChanged: root.triggerAutoSave()
                                     }
                                     UiButton {
                                         text: "生成描述"
@@ -1795,6 +1913,7 @@ ApplicationWindow {
                                     if (editorContent.isMarkdown && !root.degradeRendering) {
                                         previewRenderTimer.restart()
                                     }
+                                    root.triggerAutoSave()
                                 }
                             }
 
@@ -1826,10 +1945,7 @@ ApplicationWindow {
                                     lineSpacing: root.uiLineSpacing
                                     onScrollRequested: (deltaY) => {
                                         if (!editorScrollView) return
-                                        var step = deltaY * 0.5
-                                        var newY = editorScrollView.contentY - step
-                                        var maxY = Math.max(0, editorScrollView.contentHeight - editorScrollView.height)
-                                        editorScrollView.contentY = Math.max(0, Math.min(maxY, newY))
+                                        editorScrollView.flick(0, deltaY * 12)
                                     }
                                 }
                             }
@@ -1854,7 +1970,14 @@ ApplicationWindow {
             Connections {
                 target: appContext
                 function onOpenedPostChanged() {
+                    if (autoSaveTimer.running) {
+                        root.doAutoSave()
+                    }
                     root.bindOpenedPostFields()
+                    if (editorContent && editorContent.isMarkdown) {
+                        root.syncPreviewText(true)
+                        mdPreview.beginContentSwitch()
+                    }
                     Qt.callLater(function() {
                         editorScrollView.contentY = 0
                     })
@@ -1898,27 +2021,19 @@ ApplicationWindow {
                 id: settingsViewport
                 anchors.fill: parent
                 contentWidth: width
-                contentHeight: (root.settingsTabIndex === 1)
-                    ? height
-                    : settingsContent.implicitHeight + 60
+                contentHeight: settingsContent.implicitHeight + 60
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 flickDeceleration: 10000
-                interactive: root.settingsTabIndex !== 1
-                ScrollBar.vertical: PageScrollBar {
-                    policy: (root.settingsTabIndex === 1)
-                        ? ScrollBar.AlwaysOff
-                        : ScrollBar.AsNeeded
-                }
+                interactive: true
+                ScrollBar.vertical: PageScrollBar {}
 
                 ColumnLayout {
                     id: settingsContent
                     width: parent.width - 48
                     x: 24
                     y: 24
-                    height: (root.settingsTabIndex === 1)
-                        ? (settingsViewport.height - 48)
-                        : implicitHeight
+                    height: implicitHeight
                     spacing: 24
 
                     // ---- Header ----
@@ -1998,22 +2113,13 @@ ApplicationWindow {
                                 compact: true
                                 onClicked: root.toggleConsoleVisibility()
                             }
-
-                            UiButton {
-                                Layout.fillWidth: true
-                                text: root.consoleExpanded ? "收起日志面板" : "展开日志面板"
-                                tone: "outlined"
-                                compact: true
-                                enabled: root.consoleVisible
-                                onClicked: root.toggleConsoleExpanded()
-                            }
                         }
                     }
 
                     UiCard {
                         visible: root.consoleVisible
                         Layout.fillWidth: true
-                        implicitHeight: root.consoleExpanded ? 340 : 188
+                        implicitHeight: 260
                         color: root.md3InverseSurface
 
                         ColumnLayout {
@@ -2040,18 +2146,11 @@ ApplicationWindow {
                                         font.weight: Font.Medium
                                         Layout.fillWidth: true
                                     }
-
-                                    Text {
-                                        text: root.consoleExpanded ? "已展开" : "已收起"
-                                        color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.72)
-                                        font.pixelSize: 12
-                                    }
                                 }
                             }
 
                             ScrollView {
                                 id: settingsConsoleScroll
-                                visible: root.consoleExpanded
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 clip: true
@@ -2089,80 +2188,66 @@ ApplicationWindow {
 
                             Rectangle {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 40
+                                Layout.preferredHeight: 34
                                 radius: root.shapeSmall
-                                color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.05)
-                                border.width: 1
-                                border.color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.16)
+                                color: Qt.darker(root.md3InverseSurface, 1.15)
 
                                 RowLayout {
                                     anchors.fill: parent
-                                    anchors.leftMargin: 8
-                                    anchors.rightMargin: 8
-                                    spacing: 8
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    spacing: 6
 
-                                    TextField {
+                                    Text {
+                                        text: ">"
+                                        color: root.md3InversePrimary
+                                        font.pixelSize: 13
+                                        font.weight: Font.Medium
+                                        Layout.preferredWidth: 12
+                                    }
+
+                                    TextInput {
                                         id: settingsConsoleInput
                                         Layout.fillWidth: true
-                                        placeholderText: "输入命令回车执行；Ctrl+C 中断 · ↑↓ 历史命令"
-                                        placeholderTextColor: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.62)
                                         color: root.md3InverseOnSurface
-                                        selectionColor: Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.45)
-                                        selectedTextColor: root.md3OnPrimary
                                         font.family: "Consolas"
-                                        font.pixelSize: 12
-
-                                        Keys.onPressed: function(event) {
-                                            if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C) {
-                                                appContext.submitConsoleInput("/ctrl+c")
-                                                event.accepted = true
-                                                return
-                                            }
-                                            if (event.key === Qt.Key_Up) {
-                                                if (root.consoleCommandHistory.length > 0) {
-                                                    if (root.consoleHistoryIndex < root.consoleCommandHistory.length - 1) {
-                                                        root.consoleHistoryIndex += 1
-                                                    }
-                                                    text = root.consoleCommandHistory[root.consoleCommandHistory.length - 1 - root.consoleHistoryIndex]
-                                                }
-                                                event.accepted = true
-                                                return
-                                            }
-                                            if (event.key === Qt.Key_Down) {
-                                                if (root.consoleHistoryIndex > 0) {
-                                                    root.consoleHistoryIndex -= 1
-                                                    text = root.consoleCommandHistory[root.consoleCommandHistory.length - 1 - root.consoleHistoryIndex]
-                                                } else {
-                                                    root.consoleHistoryIndex = -1
-                                                    text = ""
-                                                }
-                                                event.accepted = true
-                                                return
-                                            }
-                                        }
-
-                                        background: Rectangle {
-                                            radius: 6
-                                            color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.08)
-                                            border.width: 1
-                                            border.color: Qt.rgba(root.md3InverseOnSurface.r, root.md3InverseOnSurface.g, root.md3InverseOnSurface.b, 0.2)
-                                        }
+                                        font.pixelSize: 13
+                                        selectByMouse: true
+                                        clip: true
+                                        text: ""
 
                                         onAccepted: {
                                             var cmd = text.trim()
-                                            if (cmd.length === 0) {
-                                                return
-                                            }
-                                            if (root.consoleCommandHistory.length === 0
-                                                || root.consoleCommandHistory[root.consoleCommandHistory.length - 1] !== cmd) {
-                                                root.consoleCommandHistory.push(cmd)
-                                                if (root.consoleCommandHistory.length > 100) {
-                                                    root.consoleCommandHistory.shift()
+                                            if (cmd.length > 0) {
+                                                if (root.consoleCommandHistory.length === 0 || root.consoleCommandHistory[root.consoleCommandHistory.length - 1] !== cmd) {
+                                                    root.consoleCommandHistory.push(cmd)
                                                 }
+                                                root.consoleHistoryIndex = -1
+                                                appContext.submitConsoleInput(cmd)
+                                                text = ""
                                             }
-                                            root.consoleHistoryIndex = -1
-                                            appContext.submitConsoleInput(cmd)
-                                            text = ""
+                                        }
+
+                                        Keys.onUpPressed: {
+                                            if (root.consoleCommandHistory.length === 0) return
+                                            if (root.consoleHistoryIndex < 0) {
+                                                root.consoleHistoryIndex = root.consoleCommandHistory.length - 1
+                                            } else if (root.consoleHistoryIndex > 0) {
+                                                root.consoleHistoryIndex -= 1
+                                            }
+                                            text = root.consoleCommandHistory[root.consoleHistoryIndex]
+                                        }
+
+                                        Keys.onDownPressed: {
+                                            if (root.consoleCommandHistory.length === 0) return
+                                            if (root.consoleHistoryIndex < 0) return
+                                            root.consoleHistoryIndex += 1
+                                            if (root.consoleHistoryIndex >= root.consoleCommandHistory.length) {
+                                                root.consoleHistoryIndex = -1
+                                                text = ""
+                                            } else {
+                                                text = root.consoleCommandHistory[root.consoleHistoryIndex]
+                                            }
                                         }
                                     }
                                 }
@@ -2186,7 +2271,8 @@ ApplicationWindow {
                                     { label: "文章设置", glyph: "文" },
                                     { label: "站点设置", glyph: "站" },
                                     { label: "系统设置", glyph: "系" },
-                                    { label: "信息统计", glyph: "统" }
+                                    { label: "信息统计", glyph: "统" },
+                                    { label: "回收站", glyph: "删" }
                                 ]
                                 delegate: Rectangle {
                                     Layout.fillWidth: true
@@ -2462,7 +2548,25 @@ ApplicationWindow {
                                     cacheBuffer: 320
                                     boundsBehavior: Flickable.StopAtBounds
                                     spacing: 6
-                                    ScrollBar.vertical: PageScrollBar {}
+                                    ScrollBar.vertical: ScrollBar {
+                                        policy: ScrollBar.AsNeeded
+                                        minimumSize: 0.08
+                                        interactive: true
+                                        hoverEnabled: true
+                                        width: 6
+                                        contentItem: Rectangle {
+                                            implicitWidth: 4
+                                            radius: 2
+                                            color: parent.pressed
+                                                ? Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.8)
+                                                : (parent.hovered
+                                                    ? Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.65)
+                                                    : Qt.rgba(root.md3Outline.r, root.md3Outline.g, root.md3Outline.b, 0.52))
+                                        }
+                                        background: Rectangle {
+                                            color: "transparent"
+                                        }
+                                    }
                                     delegate: Rectangle {
                                         width: ListView.view.width
                                         height: 56
@@ -2515,6 +2619,121 @@ ApplicationWindow {
                                                 tone: "tonal"
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    UiCard {
+                        visible: root.settingsTabIndex === 2
+                        Layout.fillWidth: true
+                        implicitHeight: aiConfigCol.implicitHeight + 32
+                        color: root.md3SurfaceContainer
+
+                        ColumnLayout {
+                            id: aiConfigCol
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 16
+                            spacing: 12
+
+                            Text { text: "AI 配置"; font.pixelSize: 16; font.weight: Font.DemiBold; color: root.md3OnSurface }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                Text { text: "Provider"; color: root.md3OnSurfaceVariant; font.pixelSize: 13; Layout.preferredWidth: 64 }
+                                UiComboBox {
+                                    id: aiProviderCombo
+                                    Layout.fillWidth: true
+                                    model: ["none", "deepseek", "glm", "openai"]
+                                    currentIndex: model.indexOf(appContext.aiProvider) >= 0 ? model.indexOf(appContext.aiProvider) : 0
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                Text { text: "API Base"; color: root.md3OnSurfaceVariant; font.pixelSize: 13; Layout.preferredWidth: 64 }
+                                UiTextField {
+                                    id: aiApiBaseInput
+                                    Layout.fillWidth: true
+                                    text: appContext.aiApiBase
+                                    placeholderText: "https://api.deepseek.com"
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                Text { text: "API Key"; color: root.md3OnSurfaceVariant; font.pixelSize: 13; Layout.preferredWidth: 64 }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+
+                                    UiTextField {
+                                        id: aiApiKeyInput
+                                        Layout.fillWidth: true
+                                        text: {
+                                            var k = appContext.aiApiKey
+                                            if (k.length <= 4) return k
+                                            return k.substring(0, 2) + "****" + k.substring(k.length - 2)
+                                        }
+                                        placeholderText: "sk-..."
+                                        readOnly: !root.aiKeyEditing
+                                        echoMode: root.aiKeyEditing ? TextInput.Normal : TextInput.Password
+                                    }
+
+                                    UiButton {
+                                        text: root.aiKeyEditing ? "保存" : "编辑"
+                                        tone: "outlined"
+                                        compact: true
+                                        onClicked: {
+                                            if (root.aiKeyEditing) {
+                                                var raw = aiApiKeyInput.text
+                                                if (raw.indexOf("****") >= 0) {
+                                                    // user didn't change the masked text, keep original
+                                                } else {
+                                                    appContext.aiApiKey = raw
+                                                }
+                                                root.aiKeyEditing = false
+                                            } else {
+                                                aiApiKeyInput.text = appContext.aiApiKey
+                                                root.aiKeyEditing = true
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                Text { text: "Model"; color: root.md3OnSurfaceVariant; font.pixelSize: 13; Layout.preferredWidth: 64 }
+                                UiTextField {
+                                    id: aiModelInput
+                                    Layout.fillWidth: true
+                                    text: appContext.aiModel
+                                    placeholderText: "deepseek-v4-flash"
+                                }
+                            }
+
+                            UiButton {
+                                Layout.fillWidth: true
+                                text: "保存 AI 配置"
+                                tone: "filled"
+                                onClicked: {
+                                    appContext.aiProvider = aiProviderCombo.currentValue || aiProviderCombo.model[aiProviderCombo.currentIndex]
+                                    appContext.aiApiBase = aiApiBaseInput.text
+                                    appContext.aiModel = aiModelInput.text
+                                    if (root.aiKeyEditing) {
+                                        var raw = aiApiKeyInput.text
+                                        if (raw.indexOf("****") < 0) {
+                                            appContext.aiApiKey = raw
+                                        }
+                                        root.aiKeyEditing = false
                                     }
                                 }
                             }
@@ -2891,7 +3110,6 @@ ApplicationWindow {
                     UiCard {
                         visible: root.settingsTabIndex === 1
                         Layout.fillWidth: true
-                        Layout.fillHeight: root.settingsTabIndex === 1
                         implicitHeight: siteConfigCol.implicitHeight + 40
 
                         ColumnLayout {
@@ -2921,7 +3139,8 @@ ApplicationWindow {
                             // Config list
                             Rectangle {
                                 Layout.fillWidth: true
-                                Layout.fillHeight: true
+                                Layout.preferredHeight: Math.min(480, configModel.count * 56 + 20)
+                                Layout.minimumHeight: 120
                                 radius: root.shapeMedium
                                 color: root.md3SurfaceContainer
                                 border.width: 1
@@ -2985,8 +3204,175 @@ ApplicationWindow {
                                     onClicked: {
                                         var out = {};
                                         for (var i = 0; i < configModel.count; i++) out[configModel.get(i).rawKey] = configModel.get(i).value;
-                                        appContext.saveSiteConfig(out);
-                                        appContext.loadSiteConfig();
+                                        root.showConfirmDialog(
+                                            "保存站点配置",
+                                            "确定要保存站点配置吗？这将直接修改 _config.yml 文件。",
+                                            "保存",
+                                            false,
+                                            function() {
+                                                appContext.saveSiteConfig(out);
+                                                appContext.loadSiteConfig();
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    UiCard {
+                        visible: root.settingsTabIndex === 4
+                        Layout.fillWidth: true
+                        implicitHeight: trashCol.implicitHeight + 40
+
+                        ColumnLayout {
+                            id: trashCol
+                            anchors.fill: parent
+                            anchors.margins: 20
+                            spacing: 12
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Text {
+                                    text: "回收站"
+                                    font.pixelSize: 16
+                                    font.weight: Font.DemiBold
+                                    color: root.md3OnSurface
+                                    Layout.fillWidth: true
+                                }
+
+                                Rectangle {
+                                    Layout.preferredWidth: trashCountText.implicitWidth + 16
+                                    Layout.preferredHeight: 24
+                                    radius: 12
+                                    color: root.md3PrimaryContainer
+                                    visible: appContext.trashItems.length > 0
+
+                                    Text {
+                                        id: trashCountText
+                                        anchors.centerIn: parent
+                                        text: String(appContext.trashItems.length)
+                                        font.pixelSize: 12
+                                        font.weight: Font.Medium
+                                        color: root.md3OnPrimaryContainer
+                                    }
+                                }
+
+                                UiButton {
+                                    text: "清空"
+                                    tone: "text"
+                                    danger: true
+                                    compact: true
+                                    visible: appContext.trashItems.length > 0
+                                    onClicked: {
+                                        root.showConfirmDialog(
+                                            "清空回收站",
+                                            "确定要清空回收站吗？共 " + appContext.trashItems.length + " 篇文章将被永久删除，此操作不可恢复。",
+                                            "清空",
+                                            true,
+                                            function() { appContext.emptyTrash() }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Text {
+                                visible: appContext.trashItems.length === 0
+                                text: "回收站为空"
+                                font.pixelSize: 13
+                                color: root.md3OnSurfaceVariant
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.fillWidth: true
+                                Layout.topMargin: 20
+                                Layout.bottomMargin: 20
+                            }
+
+                            UiCard {
+                                visible: appContext.trashItems.length > 0
+                                Layout.fillWidth: true
+                                color: root.md3SurfaceContainer
+                                implicitHeight: Math.max(120, trashListView.contentHeight + 16)
+
+                                ListView {
+                                    id: trashListView
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    clip: true
+                                    model: appContext.trashItems
+                                    reuseItems: true
+                                    cacheBuffer: 320
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    spacing: 6
+                                    ScrollBar.vertical: ListScrollBar {}
+
+                                    delegate: Rectangle {
+                                        width: ListView.view.width
+                                        height: 96
+                                        radius: root.shapeSmall
+                                        color: root.md3SurfaceContainerLow
+                                        border.width: 0
+
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.margins: 12
+                                            spacing: 12
+
+                                            Column {
+                                                Layout.fillWidth: true
+                                                Layout.alignment: Qt.AlignVCenter
+                                                spacing: 3
+
+                                                Text {
+                                                    text: modelData.title || "未知标题"
+                                                    font.weight: Font.Medium
+                                                    color: root.md3OnSurface
+                                                    elide: Text.ElideRight
+                                                    width: parent.width
+                                                }
+                                                Text {
+                                                    text: (modelData.originalPath || "")
+                                                    color: root.md3OnSurfaceVariant
+                                                    font.pixelSize: 11
+                                                    elide: Text.ElideMiddle
+                                                    width: parent.width
+                                                }
+                                                Text {
+                                                    text: "删除于 " + (modelData.deletedAt || "") + " · " + (modelData.daysLeft !== undefined ? modelData.daysLeft : 30) + " 天后过期"
+                                                    color: root.md3OnSurfaceVariant
+                                                    font.pixelSize: 11
+                                                }
+                                            }
+
+                                            RowLayout {
+                                                spacing: 6
+                                                Layout.alignment: Qt.AlignVCenter
+                                                UiButton {
+                                                    text: "还原"
+                                                    tone: "outlined"
+                                                    compact: true
+                                                    onClicked: appContext.restorePost(modelData.id)
+                                                }
+                                                UiButton {
+                                                    text: "删除"
+                                                    tone: "text"
+                                                    danger: true
+                                                    compact: true
+                                                    onClicked: {
+                                                        var trashId = modelData.id
+                                                        var trashTitle = modelData.title || ""
+                                                        root.showConfirmDialog(
+                                                            "永久删除",
+                                                            "确定要永久删除「" + trashTitle + "」吗？此操作不可恢复。",
+                                                            "删除",
+                                                            true,
+                                                            function() { appContext.permanentlyDeletePost(trashId) }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3401,6 +3787,103 @@ ApplicationWindow {
                             root.pendingDeleteProjectPath = ""
                             root.pendingDeleteProjectName = ""
                             deleteProjectDialog.close()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: confirmDialog
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        title: ""
+        standardButtons: Dialog.NoButton
+        padding: 0
+        implicitWidth: 420
+
+        background: Rectangle {
+            radius: root.shapeLarge
+            color: root.md3SurfaceContainerLowest
+            border.width: 1
+            border.color: root.md3OutlineVariant
+        }
+
+        contentItem: Item {
+            implicitWidth: 420
+            implicitHeight: confirmDialogCol.implicitHeight + 40
+
+            ColumnLayout {
+                id: confirmDialogCol
+                width: parent.implicitWidth - 40
+                anchors.centerIn: parent
+                spacing: 16
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+
+                    Rectangle {
+                        width: 40
+                        height: 40
+                        radius: 20
+                        color: root.confirmDialogIsDanger ? root.md3ErrorContainer : root.md3PrimaryContainer
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "?"
+                            font.pixelSize: 18
+                            font.weight: Font.DemiBold
+                            color: root.confirmDialogIsDanger ? root.md3Error : root.md3Primary
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+
+                        Text {
+                            text: root.confirmDialogTitle
+                            font.pixelSize: 16
+                            font.weight: Font.DemiBold
+                            color: root.md3OnSurface
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: root.confirmDialogMessage
+                            color: root.md3OnSurface
+                            font.pixelSize: 13
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                            width: parent.width
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    Item { Layout.fillWidth: true }
+                    UiButton {
+                        text: "取消"
+                        tone: "outlined"
+                        onClicked: {
+                            root.pendingConfirmCallback = null
+                            confirmDialog.close()
+                        }
+                    }
+                    UiButton {
+                        text: root.confirmDialogConfirmText
+                        tone: "filled"
+                        danger: root.confirmDialogIsDanger
+                        onClicked: {
+                            if (root.pendingConfirmCallback) {
+                                root.pendingConfirmCallback()
+                                root.pendingConfirmCallback = null
+                            }
+                            confirmDialog.close()
                         }
                     }
                 }

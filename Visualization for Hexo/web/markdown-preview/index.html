@@ -261,6 +261,18 @@
       }
     }
 
+    window.__hexoCache = new Map();
+    window.__hexoCacheMax = 10;
+
+    function simpleHash(str) {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) - h) + str.charCodeAt(i);
+        h |= 0;
+      }
+      return String(h);
+    }
+
     function renderMarkdown(markdownText, options) {
       const src = typeof markdownText === "string" ? markdownText : "";
       applyTypography(options);
@@ -292,7 +304,29 @@
 
     window.updateMarkdown = function(markdownText, options) {
       try {
+        const src = typeof markdownText === "string" ? markdownText : "";
+        const opts = options || {};
+        const cacheKey = simpleHash(src + "|" + (opts.bodyFontSize || "") + "|" + (opts.lineSpacing || ""));
+
+        // Check cache: if this exact content was rendered before, restore HTML directly
+        const cached = window.__hexoCache.get(cacheKey);
+        if (cached && cached.html !== undefined) {
+          applyTypography(opts);
+          container.innerHTML = cached.html;
+          container.dataset.renderMode = "cached";
+          console.log('[HexoPreview] updateMarkdown cache hit, key=', cacheKey);
+          return true;
+        }
+
         const ok = renderMarkdown(markdownText, options);
+        if (ok) {
+          // Store rendered HTML in cache
+          window.__hexoCache.set(cacheKey, { html: container.innerHTML });
+          if (window.__hexoCache.size > window.__hexoCacheMax) {
+            const firstKey = window.__hexoCache.keys().next().value;
+            window.__hexoCache.delete(firstKey);
+          }
+        }
         console.log('[HexoPreview] updateMarkdown ->', ok);
         return ok;
       } catch (e) {
