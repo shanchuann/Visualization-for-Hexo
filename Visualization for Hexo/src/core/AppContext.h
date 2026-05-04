@@ -6,8 +6,9 @@
 #include <QVariantList>
 #include <QVariantMap>
 
-class QNetworkAccessManager;
+#include "AiChatService.h"
 
+class QNetworkAccessManager;
 class CommandAdapter;
 
 class AppContext : public QObject
@@ -41,6 +42,7 @@ class AppContext : public QObject
     Q_PROPERTY(QString previewRuntimeUrl READ previewRuntimeUrl NOTIFY previewRuntimeUrlChanged)
     Q_PROPERTY(QString previewPageHtml READ previewPageHtml NOTIFY previewPageHtmlChanged)
     Q_PROPERTY(QVariantList trashItems READ trashItems NOTIFY trashItemsChanged)
+    Q_PROPERTY(AiChatService* aiChat READ aiChat CONSTANT)
 
 public:
     explicit AppContext(QObject *parent = nullptr);
@@ -74,6 +76,7 @@ public:
     QString previewRuntimeUrl() const;
     QString previewPageHtml() const;
     QVariantList trashItems() const;
+    AiChatService* aiChat() const;
 
     void setAutoGenerateEnabled(bool enabled);
     void setPostSortMode(int mode);
@@ -155,6 +158,10 @@ public:
     Q_INVOKABLE void emptyTrash();
     Q_INVOKABLE void scanTrash();
 
+    Q_INVOKABLE QVariantList computeDiff(const QString &original, const QString &proposed);
+    Q_INVOKABLE void applyAiEditedBody(const QString &body);
+    Q_INVOKABLE QVariantMap getReferenceContext(const QString &postPath) const;
+
 signals:
     void currentProjectPathChanged();
     void taskRunningChanged();
@@ -168,6 +175,7 @@ signals:
     void autoGenerateEnabledChanged();
     void openedPostPathChanged();
     void openedPostChanged();
+    void postAboutToChange(const QString &currentPath);
     void firstRunChanged();
     void aiProviderChanged();
     void aiApiBaseChanged();
@@ -265,4 +273,5 @@ private:
     bool m_previewOpened = false;
     QString m_lastPreviewUrl;
     QVariantList m_trashItems;
+    AiChatService *m_aiChat = nullptr;
 };

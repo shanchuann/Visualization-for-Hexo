@@ -240,7 +240,12 @@ Item {
                 }
             }
 
-            onRenderProcessTerminated: function(terminationStatus, exitCode) {
+        }
+
+        Connections {
+            target: previewWeb
+            ignoreUnknownSignals: true
+            function onRenderProcessTerminated(terminationStatus, exitCode) {
                 root.failLoad("渲染进程异常退出（status=" + terminationStatus + ", exitCode=" + exitCode + "）")
             }
         }
@@ -322,7 +327,9 @@ Item {
             Behavior on opacity { NumberAnimation { duration: 150 } }
 
             Column {
-                anchors.centerIn: parent
+                anchors.top: parent.top
+                anchors.topMargin: 40
+                anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 14
 
                 Rectangle {

@@ -98,6 +98,8 @@
     <ClCompile Include="src\adapters\CommandAdapter.cpp" />
     <ClCompile Include="src\adapters\YamlAdapter.cpp" />
     <ClCompile Include="src\core\AppContext.cpp" />
+    <ClCompile Include="src\core\AiChatService.cpp" />
+    <ClCompile Include="src\core\DiffEngine.cpp" />
     <ClCompile Include="src\core\ConfigService.cpp" />
     <ClCompile Include="src\core\EditorBridge.cpp" />
     <ClCompile Include="src\core\GitService.cpp" />
@@ -106,6 +108,8 @@
     <ClInclude Include="src\adapters\CommandAdapter.h" />
     <ClInclude Include="src\adapters\YamlAdapter.h" />
     <ClInclude Include="src\core\AppContext.h" />
+    <ClInclude Include="src\core\AiChatService.h" />
+    <ClInclude Include="src\core\DiffEngine.h" />
     <ClInclude Include="src\core\ConfigService.h" />
     <ClInclude Include="src\core\EditorBridge.h" />
     <ClInclude Include="src\core\GitService.h" />
@@ -115,6 +119,7 @@
     <ClInclude Include="src\models\Post.h" />
     <QtMoc Include="src\adapters\CommandAdapter.h" />
     <QtMoc Include="src\core\AppContext.h" />
+    <QtMoc Include="src\core\AiChatService.h" />
     <QtMoc Include="src\core\ConfigService.h" />
     <QtMoc Include="src\core\EditorBridge.h" />
     <QtMoc Include="src\core\GitService.h" />

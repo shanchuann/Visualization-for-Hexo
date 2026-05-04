@@ -199,6 +199,91 @@ ApplicationWindow {
     readonly property bool isWindowMaximized: root.visibility === Window.Maximized || ((root.windowState & Qt.WindowMaximized) !== 0)
     readonly property bool isWindowFullScreen: root.visibility === Window.FullScreen || ((root.windowState & Qt.WindowFullScreen) !== 0)
 
+    // AI edit mode state
+    QtObject {
+        id: aiUi
+        property bool editMode: false
+        property var referencedPosts: []
+    }
+
+    QtObject {
+        id: aiSession
+        property bool streaming: false
+        property string streamingText: ""
+        property int currentRequestId: 0
+        property var pendingDiff: null
+        property var hunkDecisions: ({})
+    }
+
+    readonly property int diffChangeCount: {
+        if (!aiSession.pendingDiff) return 0
+        var count = 0
+        for (var i = 0; i < aiSession.pendingDiff.hunks.length; i++) {
+            if (aiSession.pendingDiff.hunks[i].type !== "equal") count++
+        }
+        return count
+    }
+    readonly property int diffDecidedCount: {
+        if (!aiSession.pendingDiff) return 0
+        var count = 0
+        for (var i = 0; i < aiSession.pendingDiff.hunks.length; i++) {
+            var h = aiSession.pendingDiff.hunks[i]
+            if (h.type !== "equal" && aiSession.hunkDecisions[h.hunkId] !== undefined) count++
+        }
+        return count
+    }
+    readonly property bool hasAnyDiffDecision: diffDecidedCount > 0
+
+    function enterAiEditMode() {
+        if (!appContext.openedPostPath) return
+        aiUi.editMode = true
+    }
+
+    function exitAiEditMode() {
+        if (aiSession.pendingDiff) {
+            root.showConfirmDialog(
+                "退出 AI 编辑",
+                "当前有未处理的 AI 修改建议，确定要退出吗？",
+                "退出",
+                false,
+                function() {
+                    aiSession.pendingDiff = null
+                    aiSession.hunkDecisions = ({})
+                    aiUi.editMode = false
+                    if (appContext.aiChat) appContext.aiChat.cancel()
+                }
+            )
+            return
+        }
+        aiUi.editMode = false
+        aiUi.referencedPosts = []
+        if (appContext.aiChat) appContext.aiChat.cancel()
+    }
+
+    function rebuildDiffBody(original, hunks, decisions) {
+        var result = []
+        for (var i = 0; i < hunks.length; i++) {
+            var h = hunks[i]
+            if (h.type === "equal") {
+                result = result.concat(h.origLines)
+            } else if (decisions === null) {
+                // null means accept all
+                result = result.concat(h.propLines)
+            } else {
+                if (decisions[h.hunkId] === true) {
+                    result = result.concat(h.propLines)
+                } else {
+                    result = result.concat(h.origLines)
+                }
+            }
+        }
+        var body = result.join("\n")
+        if (original.charAt(original.length - 1) === "\n" && body.charAt(body.length - 1) !== "\n") {
+            body += "\n"
+        }
+        return body
+    }
+
     onConsoleVisibleChanged: {
         if (consoleVisible) {
             consoleExpanded = true
@@ -294,6 +379,16 @@ ApplicationWindow {
     }
 
     function editorBodyHeight() {
+        if (aiSession && aiSession.pendingDiff) {
+            // DiffReviewView: use a reasonable height based on hunk count
+            var hunks = aiSession.pendingDiff.hunks || []
+            var lineCount = 0
+            for (var i = 0; i < hunks.length; i++) {
+                lineCount += (hunks[i].origLines ? hunks[i].origLines.length : 0)
+                lineCount += (hunks[i].propLines ? hunks[i].propLines.length : 0)
+            }
+            return Math.max(400, lineCount * 22 + 120)
+        }
         var previewHeight = mdPreview.implicitHeight
         if (coverPreview.visible) {
             previewHeight += coverPreview.height + 10
@@ -411,6 +506,7 @@ ApplicationWindow {
     }
 
     function doAutoSave() {
+        if (aiSession && aiSession.pendingDiff) return
         if (!appContext.openedPostPath || appContext.openedPostPath.length === 0) return
         appContext.saveOpenedPost(
             titleInput.text,
@@ -704,6 +800,7 @@ ApplicationWindow {
         font.pixelSize: 13
         leftPadding: 16
         rightPadding: 30
+        property int horizontalAlignment: Text.AlignLeft
         
         indicator: Item {
             x: cb.width - width - 6
@@ -796,6 +893,11 @@ ApplicationWindow {
         }
 
         contentItem: Loader {
+            anchors.fill: parent
+            anchors.leftMargin: cb.leftPadding
+            anchors.rightMargin: cb.rightPadding
+            anchors.topMargin: cb.topPadding
+            anchors.bottomMargin: cb.bottomPadding
             sourceComponent: cb.editable ? editableComboContent : readonlyComboContent
         }
 
@@ -803,12 +905,14 @@ ApplicationWindow {
             id: editableComboContent
             TextInput {
                 id: editableInput
+                anchors.fill: parent
                 leftPadding: 0
                 rightPadding: 0
+                verticalAlignment: Text.AlignVCenter
+                horizontalAlignment: cb.horizontalAlignment
                 text: cb.editText
                 font: cb.font
                 color: root.md3OnSurface
-                verticalAlignment: Text.AlignVCenter
                 selectByMouse: true
 
                 onTextEdited: {
@@ -831,10 +935,12 @@ ApplicationWindow {
         Component {
             id: readonlyComboContent
             Text {
+                anchors.fill: parent
                 text: cb.displayText
                 font: cb.font
                 color: root.md3OnSurface
                 verticalAlignment: Text.AlignVCenter
+                horizontalAlignment: cb.horizontalAlignment
                 elide: Text.ElideRight
             }
         }
@@ -1455,69 +1561,6 @@ ApplicationWindow {
             }
         }
 
-        Rectangle {
-            id: centeredModeToggle
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.verticalCenter: parent.verticalCenter
-            width: 148
-            height: 30
-            radius: 15
-            color: root.md3SurfaceContainerHigh
-            border.width: 1
-            border.color: root.md3OutlineVariant
-            z: 14
-
-            Row {
-                anchors.fill: parent
-                anchors.margins: 2
-                spacing: 2
-
-                Rectangle {
-                    width: 71
-                    height: 26
-                    radius: 13
-                    color: !editorContent.isMarkdown ? root.md3SecondaryContainer : "transparent"
-                    Behavior on color { ColorAnimation { duration: 160 } }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "源码"
-                        font.pixelSize: 13
-                        font.weight: Font.Medium
-                        color: !editorContent.isMarkdown ? root.md3OnSecondaryContainer : root.md3OnSurfaceVariant
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.articleViewMode = 0
-                    }
-                }
-
-                Rectangle {
-                    width: 71
-                    height: 26
-                    radius: 13
-                    color: editorContent.isMarkdown ? root.md3SecondaryContainer : "transparent"
-                    Behavior on color { ColorAnimation { duration: 160 } }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "预览"
-                        font.pixelSize: 13
-                        font.weight: Font.Medium
-                        color: editorContent.isMarkdown ? root.md3OnSecondaryContainer : root.md3OnSurfaceVariant
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.articleViewMode = 1
-                    }
-                }
-            }
-        }
-
     }
 
     // ======================== Main Content ========================
@@ -1544,31 +1587,35 @@ ApplicationWindow {
             color: root.sidePanelBg
             visible: true
 
-            ColumnLayout {
+            StackLayout {
+                id: sidebarStack
                 anchors.fill: parent
-                spacing: 0
+                currentIndex: aiUi.editMode ? 1 : 0
 
-                // Sidebar header
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 64
-                    color: "transparent"
+                ColumnLayout {
+                    spacing: 0
 
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 20
-                        anchors.rightMargin: 12
+                    // Sidebar header
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 64
+                        color: "transparent"
 
-                        Text {
-                            text: "文章"
-                            font.pixelSize: 16
-                            font.weight: Font.DemiBold
-                            color: root.md3OnSurface
-                            Layout.fillWidth: true
-                            Layout.alignment: Qt.AlignVCenter
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 20
+                            anchors.rightMargin: 12
+
+                            Text {
+                                text: "文章"
+                                font.pixelSize: 16
+                                font.weight: Font.DemiBold
+                                color: root.md3OnSurface
+                                Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignVCenter
+                            }
                         }
                     }
-                }
 
                 // Posts list
                 ListView {
@@ -1578,7 +1625,6 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     clip: true
                     model: appContext.posts
-                    reuseItems: true
                     cacheBuffer: 720
                     boundsBehavior: Flickable.StopAtBounds
                     flickDeceleration: 13000
@@ -1602,14 +1648,12 @@ ApplicationWindow {
                             }
                             onPressAndHold: {
                                 if (postEntry.path) {
-                                    var postPath = postEntry.path
-                                    var postTitle = postEntry.title || ""
                                     root.showConfirmDialog(
                                         "删除文章",
-                                        "确定要删除文章「" + postTitle + "」吗？删除后可在回收站中恢复。",
+                                        "确定要删除文章「" + (postEntry.title || "") + "」吗？删除后可在回收站中恢复。",
                                         "删除",
                                         true,
-                                        function() { appContext.deletePost(postPath) }
+                                        (function(path) { return function() { appContext.deletePost(path) } })(postEntry.path)
                                     )
                                 }
                             }
@@ -1668,14 +1712,12 @@ ApplicationWindow {
                                             enabled: opacity > 0.5
                                             Behavior on opacity { NumberAnimation { duration: 100 } }
                                             onClicked: {
-                                                var postPath = postEntry.path
-                                                var postTitle = postEntry.title || ""
                                                 root.showConfirmDialog(
                                                     "删除文章",
-                                                    "确定要删除文章「" + postTitle + "」吗？删除后可在回收站中恢复。",
+                                                    "确定要删除文章「" + (postEntry.title || "") + "」吗？删除后可在回收站中恢复。",
                                                     "删除",
                                                     true,
-                                                    function() { appContext.deletePost(postPath) }
+                                                    (function(path) { return function() { appContext.deletePost(path) } })(postEntry.path)
                                                 )
                                             }
                                         }
@@ -1696,6 +1738,45 @@ ApplicationWindow {
                     }
                 }
 
+                }
+
+                // AI Chat Panel (index 1)
+                AiChatPanel {
+                    aiSession: aiSession
+                    aiUi: aiUi
+                    md3Primary: root.md3Primary
+                    md3OnPrimary: root.md3OnPrimary
+                    md3PrimaryContainer: root.md3PrimaryContainer
+                    md3OnPrimaryContainer: root.md3OnPrimaryContainer
+                    md3Surface: root.md3Surface
+                    md3OnSurface: root.md3OnSurface
+                    md3SurfaceContainer: root.md3SurfaceContainer
+                    md3SurfaceContainerHigh: root.md3SurfaceContainerHigh
+                    md3OnSurfaceVariant: root.md3OnSurfaceVariant
+                    md3OutlineVariant: root.md3OutlineVariant
+                    md3Error: root.md3Error
+                    md3ErrorContainer: root.md3ErrorContainer
+                    shapeMedium: root.shapeMedium
+                    onCloseRequested: root.exitAiEditMode()
+                    onApplyAllRequested: {
+                        if (!aiSession.pendingDiff) return
+                        var rebuilt = root.rebuildDiffBody(aiSession.pendingDiff.original, aiSession.pendingDiff.hunks, null)
+                        appContext.applyAiEditedBody(rebuilt)
+                        aiSession.pendingDiff = null
+                        aiSession.hunkDecisions = ({})
+                    }
+                    onRejectAllRequested: {
+                        aiSession.pendingDiff = null
+                        aiSession.hunkDecisions = ({})
+                    }
+                    onApplyChangesRequested: {
+                        if (!aiSession.pendingDiff) return
+                        var rebuilt = root.rebuildDiffBody(aiSession.pendingDiff.original, aiSession.pendingDiff.hunks, aiSession.hunkDecisions)
+                        appContext.applyAiEditedBody(rebuilt)
+                        aiSession.pendingDiff = null
+                        aiSession.hunkDecisions = ({})
+                    }
+                }
             }
         }
 
@@ -1828,6 +1909,9 @@ ApplicationWindow {
                                         model: []
                                         editText: appContext.openedPostDate
                                         spacing: 0
+                                        horizontalAlignment: Text.AlignHCenter
+                                        leftPadding: 12
+                                        rightPadding: 12
                                         indicator: Item {
                                             width: 0
                                             height: 0
@@ -1891,11 +1975,99 @@ ApplicationWindow {
                         // Divider
                         Rectangle { width: parent.width; height: 1; color: root.md3OutlineVariant }
 
+                        // Sticky diff header (visible when AI proposes changes)
+                        Rectangle {
+                            width: parent.width
+                            height: visible ? diffHeaderRow.implicitHeight + 16 : 0
+                            visible: aiSession && aiSession.pendingDiff !== null
+                            color: Qt.rgba(0.106, 0.431, 0.953, 0.06)
+                            z: 10
+
+                            RowLayout {
+                                id: diffHeaderRow
+                                anchors.fill: parent
+                                anchors.leftMargin: 14
+                                anchors.rightMargin: 10
+                                spacing: 10
+
+                                Text {
+                                    text: {
+                                        var count = aiSession && aiSession.pendingDiff ? aiSession.pendingDiff.hunks.filter(function(h) { return h.type !== "equal" }).length : 0
+                                        return "AI 修改建议 · " + count + " 处"
+                                    }
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                    color: root.md3OnSurface
+                                    Layout.fillWidth: true
+                                }
+
+                                // Apply decided
+                                Rectangle {
+                                    width: diffApplyLabel.implicitWidth + 20
+                                    height: 28
+                                    radius: 14
+                                    color: root.hasAnyDiffDecision ? root.md3Primary : root.md3OutlineVariant
+
+                                    Text {
+                                        id: diffApplyLabel
+                                        anchors.centerIn: parent
+                                        text: root.diffDecidedCount < root.diffChangeCount
+                                            ? "应用 (" + root.diffDecidedCount + "/" + root.diffChangeCount + ")"
+                                            : "应用全部"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Medium
+                                        color: root.hasAnyDiffDecision ? root.md3OnPrimary : root.md3OnSurfaceVariant
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: root.hasAnyDiffDecision ? Qt.PointingHandCursor : Qt.ForbiddenCursor
+                                        onClicked: {
+                                            if (root.hasAnyDiffDecision && aiSession.pendingDiff) {
+                                                var rebuilt = root.rebuildDiffBody(aiSession.pendingDiff.original, aiSession.pendingDiff.hunks, aiSession.hunkDecisions)
+                                                appContext.applyAiEditedBody(rebuilt)
+                                                aiSession.pendingDiff = null
+                                                aiSession.hunkDecisions = ({})
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Reject all
+                                Rectangle {
+                                    width: diffRejectLabel.implicitWidth + 20
+                                    height: 28
+                                    radius: 14
+                                    color: "transparent"
+                                    border.width: 1
+                                    border.color: root.md3OutlineVariant
+
+                                    Text {
+                                        id: diffRejectLabel
+                                        anchors.centerIn: parent
+                                        text: "全部拒绝"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Medium
+                                        color: root.md3OnSurfaceVariant
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            aiSession.pendingDiff = null
+                                            aiSession.hunkDecisions = ({})
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Editor body
                         StackLayout {
                             width: parent.width
                             height: root.editorBodyHeight()
-                            currentIndex: editorContent.isMarkdown ? 1 : 0
+                            currentIndex: aiSession.pendingDiff ? 2 : (editorContent.isMarkdown ? 1 : 0)
 
                             TextEdit {
                                 id: bodyEdit
@@ -1910,6 +2082,7 @@ ApplicationWindow {
                                 readOnly: false
                                 textFormat: TextEdit.PlainText
                                 onTextChanged: {
+                                    if (aiSession && aiSession.pendingDiff) return
                                     if (editorContent.isMarkdown && !root.degradeRendering) {
                                         previewRenderTimer.restart()
                                     }
@@ -1949,6 +2122,32 @@ ApplicationWindow {
                                     }
                                 }
                             }
+
+                            // Diff Review View (index 2)
+                            Item {
+                                DiffReviewView {
+                                    width: parent.width
+                                    height: parent.height
+                                    pendingDiff: aiSession.pendingDiff
+                                    hunkDecisions: aiSession.hunkDecisions
+                                    md3Primary: root.md3Primary
+                                    md3OnPrimary: root.md3OnPrimary
+                                    md3PrimaryContainer: root.md3PrimaryContainer
+                                    md3OnPrimaryContainer: root.md3OnPrimaryContainer
+                                    md3OnSurface: root.md3OnSurface
+                                    md3OnSurfaceVariant: root.md3OnSurfaceVariant
+                                    md3OutlineVariant: root.md3OutlineVariant
+                                    md3Error: root.md3Error
+                                    md3SurfaceContainer: root.md3SurfaceContainer
+                                    shapeMedium: root.shapeMedium
+                                    onHunkDecisionChanged: function(hunkId, accepted) {
+                                        var decs = {}
+                                        for (var k in aiSession.hunkDecisions) decs[k] = aiSession.hunkDecisions[k]
+                                        decs[hunkId] = accepted
+                                        aiSession.hunkDecisions = decs
+                                    }
+                                }
+                            }
                         }
 
                         }
@@ -1969,10 +2168,32 @@ ApplicationWindow {
 
             Connections {
                 target: appContext
-                function onOpenedPostChanged() {
-                    if (autoSaveTimer.running) {
-                        root.doAutoSave()
+                function onPostAboutToChange(oldPath) {
+                    // Save the CURRENT post before switching away
+                    autoSaveTimer.stop()
+                    if (oldPath && oldPath.length > 0 && titleInput) {
+                        appContext.saveOpenedPost(
+                            titleInput.text,
+                            categoryInput.editText,
+                            tagsInput.editText,
+                            dateInput.editText,
+                            coverInput.text,
+                            descriptionInput.text,
+                            bodyEdit.text
+                        )
                     }
+                }
+                function onOpenedPostPathChanged() {
+                    // Cancel AI state on post switch
+                    if (appContext.aiChat) appContext.aiChat.cancel()
+                    aiSession.streaming = false
+                    aiSession.streamingText = ""
+                    aiSession.pendingDiff = null
+                    aiSession.hunkDecisions = ({})
+                    aiUi.referencedPosts = []
+                }
+                function onOpenedPostChanged() {
+                    console.log("[main] onOpenedPostChanged")
                     root.bindOpenedPostFields()
                     if (editorContent && editorContent.isMarkdown) {
                         root.syncPreviewText(true)
@@ -1996,13 +2217,27 @@ ApplicationWindow {
         width: root.topBarButtonSize
         height: root.topBarButtonSize
         iconSource: root.iconBase + "MeteorIconsSidebar.svg"
-        toolTipText: sidebar.visible ? "收起文章列表" : "展开文章列表"
+        toolTipText: sidebar.visible ? "收起侧边栏" : "展开侧边栏"
         z: 18
         onClicked: {
             const nextVisible = !sidebar.visible
             sidebar.visible = nextVisible
             sidebar.SplitView.preferredWidth = nextVisible ? root.fixedSidebarWidth : 0
         }
+    }
+
+    IconActionButton {
+        id: viewModeToggle
+        anchors.left: sidebarToggle.right
+        anchors.leftMargin: 6
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 24
+        width: root.topBarButtonSize
+        height: root.topBarButtonSize
+        iconSource: editorContent.isMarkdown ? (root.iconBase + "code.svg") : (root.iconBase + "preview-open.svg")
+        toolTipText: editorContent.isMarkdown ? "切换到源码" : "切换到预览"
+        z: 18
+        onClicked: root.articleViewMode = editorContent.isMarkdown ? 0 : 1
     }
 
     // ======================== Settings Drawer (MD3 Side Sheet) ========================
@@ -2298,7 +2533,7 @@ ApplicationWindow {
                                             radius: 12
                                             color: root.settingsTabIndex === index
                                                 ? root.md3Primary
-                                                : root.md3SurfaceContainerHigh
+                                                : root.md3PrimaryContainer
                                             anchors.horizontalCenter: parent.horizontalCenter
 
                                             Text {
@@ -2725,9 +2960,26 @@ ApplicationWindow {
                                 text: "保存 AI 配置"
                                 tone: "filled"
                                 onClicked: {
-                                    appContext.aiProvider = aiProviderCombo.currentValue || aiProviderCombo.model[aiProviderCombo.currentIndex]
-                                    appContext.aiApiBase = aiApiBaseInput.text
-                                    appContext.aiModel = aiModelInput.text
+                                    var provider = aiProviderCombo.currentValue || aiProviderCombo.model[aiProviderCombo.currentIndex]
+                                    var apiBase = aiApiBaseInput.text.trim()
+                                    var model = aiModelInput.text.trim()
+
+                                    // Auto-detect provider from apiBase/model if user left provider as "none"
+                                    if (provider === "none") {
+                                        var baseLower = apiBase.toLowerCase()
+                                        var modelLower = model.toLowerCase()
+                                        if (baseLower.indexOf("deepseek") >= 0 || modelLower.indexOf("deepseek") >= 0) {
+                                            provider = "deepseek"
+                                        } else if (baseLower.indexOf("bigmodel") >= 0 || baseLower.indexOf("zhipu") >= 0 || modelLower.indexOf("glm") >= 0) {
+                                            provider = "glm"
+                                        } else if (baseLower.indexOf("openai") >= 0 || modelLower.indexOf("gpt") >= 0) {
+                                            provider = "openai"
+                                        }
+                                    }
+
+                                    appContext.aiProvider = provider
+                                    appContext.aiApiBase = apiBase
+                                    appContext.aiModel = model
                                     if (root.aiKeyEditing) {
                                         var raw = aiApiKeyInput.text
                                         if (raw.indexOf("****") < 0) {
@@ -3314,63 +3566,70 @@ ApplicationWindow {
                                         color: root.md3SurfaceContainerLow
                                         border.width: 0
 
-                                        RowLayout {
+                                        Column {
                                             anchors.fill: parent
                                             anchors.margins: 12
-                                            spacing: 12
+                                            spacing: 6
 
-                                            Column {
-                                                Layout.fillWidth: true
-                                                Layout.alignment: Qt.AlignVCenter
-                                                spacing: 3
+                                            Text {
+                                                text: modelData.title || "未知标题"
+                                                font.weight: Font.Medium
+                                                color: root.md3OnSurface
+                                                elide: Text.ElideRight
+                                                width: parent.width
+                                            }
+
+                                            Item {
+                                                width: parent.width
+                                                height: Math.max(pathText.implicitHeight, trashBtns.implicitHeight)
 
                                                 Text {
-                                                    text: modelData.title || "未知标题"
-                                                    font.weight: Font.Medium
-                                                    color: root.md3OnSurface
-                                                    elide: Text.ElideRight
-                                                    width: parent.width
-                                                }
-                                                Text {
+                                                    id: pathText
+                                                    anchors.left: parent.left
+                                                    anchors.right: trashBtns.left
+                                                    anchors.rightMargin: 12
+                                                    anchors.bottom: parent.bottom
                                                     text: (modelData.originalPath || "")
                                                     color: root.md3OnSurfaceVariant
                                                     font.pixelSize: 11
                                                     elide: Text.ElideMiddle
-                                                    width: parent.width
                                                 }
-                                                Text {
-                                                    text: "删除于 " + (modelData.deletedAt || "") + " · " + (modelData.daysLeft !== undefined ? modelData.daysLeft : 30) + " 天后过期"
-                                                    color: root.md3OnSurfaceVariant
-                                                    font.pixelSize: 11
+
+                                                RowLayout {
+                                                    id: trashBtns
+                                                    anchors.right: parent.right
+                                                    anchors.bottom: parent.bottom
+                                                    spacing: 6
+                                                    UiButton {
+                                                        text: "还原"
+                                                        tone: "outlined"
+                                                        compact: true
+                                                        onClicked: appContext.restorePost(modelData.id)
+                                                    }
+                                                    UiButton {
+                                                        text: "删除"
+                                                        tone: "text"
+                                                        danger: true
+                                                        compact: true
+                                                        onClicked: {
+                                                            var trashId = modelData.id
+                                                            var trashTitle = modelData.title || ""
+                                                            root.showConfirmDialog(
+                                                                "永久删除",
+                                                                "确定要永久删除「" + trashTitle + "」吗？此操作不可恢复。",
+                                                                "删除",
+                                                                true,
+                                                                function() { appContext.permanentlyDeletePost(trashId) }
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             }
 
-                                            RowLayout {
-                                                spacing: 6
-                                                Layout.alignment: Qt.AlignVCenter
-                                                UiButton {
-                                                    text: "还原"
-                                                    tone: "outlined"
-                                                    compact: true
-                                                    onClicked: appContext.restorePost(modelData.id)
-                                                }
-                                                UiButton {
-                                                    text: "删除"
-                                                    tone: "text"
-                                                    danger: true
-                                                    compact: true
-                                                    onClicked: {
-                                                        var trashId = modelData.id
-                                                        var trashTitle = modelData.title || ""
-                                                        root.showConfirmDialog(
-                                                            "永久删除",
-                                                            "确定要永久删除「" + trashTitle + "」吗？此操作不可恢复。",
-                                                            "删除",
-                                                            true,
-                                                            function() { appContext.permanentlyDeletePost(trashId) }
-                                                        )
-                                                    }
-                                                }
+                                            Text {
+                                                text: "删除于 " + (modelData.deletedAt || "") + " · " + (modelData.daysLeft !== undefined ? modelData.daysLeft : 30) + " 天后过期"
+                                                color: root.md3OnSurfaceVariant
+                                                font.pixelSize: 11
                                             }
                                         }
                                     }
@@ -3389,80 +3648,16 @@ ApplicationWindow {
         }
     }
 
-    Rectangle {
-        id: addFab
-        visible: true
+    SpeedDialFab {
+        id: speedDialFab
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.rightMargin: 24
-        anchors.bottomMargin: 24
-        width: 54
-        height: 54
-        radius: 27
-        color: root.md3Primary
-        border.width: 1
-        border.color: Qt.rgba(root.md3OnPrimary.r, root.md3OnPrimary.g, root.md3OnPrimary.b, 0.24)
-        z: 20
-
-        // Subtle drop shadow
-        Rectangle {
-            anchors.fill: parent
-            anchors.margins: -1
-            anchors.topMargin: 2
-            z: -1
-            radius: 27
-            color: Qt.rgba(0, 0, 0, 0.15)
-            visible: true
-        }
-
-        Text {
-            anchors.centerIn: parent
-            text: "+"
-            color: "#FFFFFF"
-            font.pixelSize: 34
-            font.weight: Font.DemiBold
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-
-        ToolTip {
-            visible: addFabMouse.containsMouse
-            text: "新增文章"
-            delay: 120
-            timeout: 1800
-
-            contentItem: Text {
-                text: "新增文章"
-                color: root.md3OnPrimaryContainer
-                font.pixelSize: 12
-                font.weight: Font.Medium
-            }
-
-            background: Rectangle {
-                radius: 10
-                color: Qt.rgba(root.md3PrimaryContainer.r, root.md3PrimaryContainer.g, root.md3PrimaryContainer.b, 0.96)
-                border.width: 1
-                border.color: Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.35)
-            }
-        }
-
-        MouseArea {
-            id: addFabMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: appContext.newPost("新文章", "未分类", "新标签")
-        }
-
-        Behavior on color { ColorAnimation { duration: 120 } }
-        
-        Rectangle {
-            anchors.fill: parent
-            radius: 27
-            color: root.md3OnPrimary
-            opacity: addFabMouse.pressed ? 0.12 : (addFabMouse.containsMouse ? 0.08 : 0)
-            Behavior on opacity { NumberAnimation { duration: 120 } }
-        }
+        anchors.rightMargin: 18
+        anchors.bottomMargin: 18
+        hasOpenedPost: appContext.openedPostPath.length > 0
+        settingsDrawerOpen: settingsDrawer.opened
+        onAddArticleRequested: appContext.newPost("新文章", "未分类", "新标签")
+        onAiEditRequested: root.enterAiEditMode()
     }
 
     Dialog {

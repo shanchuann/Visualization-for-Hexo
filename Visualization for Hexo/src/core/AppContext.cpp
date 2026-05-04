@@ -1,6 +1,8 @@
 #include "AppContext.h"
 
 #include "../adapters/CommandAdapter.h"
+#include "AiChatService.h"
+#include "DiffEngine.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -309,6 +311,8 @@ bool killProcessByPid(const qint64 pid)
 #endif
 }
 
+static QString detectAiProviderFromEnv();
+
 AppContext::AppContext(QObject *parent)
     : QObject(parent), m_command(new CommandAdapter(this)), m_network(new QNetworkAccessManager(this))
 {
@@ -354,6 +358,21 @@ AppContext::AppContext(QObject *parent)
 
     loadProjectsFromDisk();
     loadAiConfig();
+
+    m_aiChat = new AiChatService(m_network,
+        [this]() { return resolveAiApiKey(); },
+        [this]() { return aiApiBase(); },
+        [this]() { return aiModel(); },
+        [this]() {
+            QString p = aiProvider();
+            if (p == "none" || p.isEmpty()) {
+                p = detectAiProviderFromEnv();
+            }
+            return p;
+        },
+        [this]() { return appDataRoot(); },
+        this);
+
     cleanupExpiredTrash();
     scanTrash();
 
@@ -418,6 +437,7 @@ QString AppContext::aiApiKey() const { return m_aiApiKey; }
 QString AppContext::previewRuntimeUrl() const { return m_previewRuntimeUrl; }
 QString AppContext::previewPageHtml() const { return m_previewPageHtml; }
 QVariantList AppContext::trashItems() const { return m_trashItems; }
+AiChatService* AppContext::aiChat() const { return m_aiChat; }
 
 QString AppContext::renderMarkdownForPreview(const QString &markdown,
                                              int bodyFontPx,
@@ -822,6 +842,9 @@ void AppContext::openPost(const QString &filePath)
         appendLog(QString("[post] file not found: %1").arg(filePath));
         return;
     }
+    if (!m_opened.path.isEmpty()) {
+        emit postAboutToChange(m_opened.path);
+    }
     setOpenedPost(readMarkdown(filePath));
 }
 
@@ -880,6 +903,15 @@ void AppContext::newPost(const QString &title, const QString &category, const QS
     QString fileDate = QDateTime::currentDateTime().toString("yyyy-MM-dd");
     QString filePath = QDir(postsDirectory()).filePath(fileDate + "-" + slug + ".md");
 
+    // Ensure unique filename
+    if (QFile::exists(filePath)) {
+        int counter = 2;
+        do {
+            filePath = QDir(postsDirectory()).filePath(fileDate + "-" + slug + "-" + QString::number(counter) + ".md");
+            counter++;
+        } while (QFile::exists(filePath));
+    }
+
     PostData p;
     p.path = filePath;
     p.title = postTitle;
@@ -927,13 +959,18 @@ void AppContext::deletePost(const QString &filePath)
     QString trashFileName = QString("%1_%2").arg(timestamp, originalFileName);
     QString trashFilePath = QDir(trashDir).filePath(trashFileName);
 
+    f.close(); // Release file handle before rename/remove
+
     bool moved = false;
     if (QFile::rename(filePath, trashFilePath)) {
         moved = true;
     } else {
         // Fallback: copy then remove
-        if (QFile::copy(filePath, trashFilePath) && f.remove()) {
-            moved = true;
+        if (QFile::copy(filePath, trashFilePath)) {
+            QFile::remove(filePath);
+            if (!QFile::exists(filePath)) {
+                moved = true;
+            }
         }
     }
 
@@ -956,6 +993,9 @@ void AppContext::deletePost(const QString &filePath)
         rebuildSearchIndex();
 
         if (wasOpened) {
+            // Clear m_opened.path BEFORE opening next post so that
+            // postAboutToChange → saveOpenedPost won't recreate the deleted file
+            m_opened.path.clear();
             if (!m_posts.isEmpty()) {
                 int nextIndex = qMin(deletedIndex, m_posts.size() - 1);
                 if (nextIndex < 0) nextIndex = 0;
@@ -2189,6 +2229,57 @@ QString AppContext::generateDescriptionWithGlm(const QString &title, const QStri
         content = content.left(120).trimmed();
     }
     return content;
+}
+
+QVariantList AppContext::computeDiff(const QString &original, const QString &proposed)
+{
+    QVector<DiffHunk> hunks = DiffEngine::computeHunks(original, proposed);
+    QVariantList result;
+    for (const DiffHunk &h : hunks) {
+        QVariantMap m;
+        switch (h.type) {
+        case DiffHunk::Equal:   m["type"] = "equal"; break;
+        case DiffHunk::Replace: m["type"] = "replace"; break;
+        case DiffHunk::Insert:  m["type"] = "insert"; break;
+        case DiffHunk::Delete:  m["type"] = "delete"; break;
+        }
+        m["hunkId"] = h.hunkId;
+        m["origLines"] = QVariant::fromValue(h.origLines);
+        m["propLines"] = QVariant::fromValue(h.propLines);
+        m["origStart"] = h.origStart;
+        m["origEnd"] = h.origEnd;
+        m["propStart"] = h.propStart;
+        m["propEnd"] = h.propEnd;
+        result.append(m);
+    }
+    return result;
+}
+
+void AppContext::applyAiEditedBody(const QString &body)
+{
+    m_opened.body = body;
+    writeMarkdown(m_opened);
+    emit openedPostChanged();
+}
+
+QVariantMap AppContext::getReferenceContext(const QString &postPath) const
+{
+    QVariantMap result;
+    PostData post = readMarkdown(postPath);
+    result["title"] = post.title;
+    result["description"] = post.description;
+
+    // Extract headings of any level
+    QStringList headings;
+    static QRegularExpression headingRe(QStringLiteral("^(#{1,6})\\s+(.+)$"),
+                                       QRegularExpression::MultilineOption);
+    QRegularExpressionMatchIterator it = headingRe.globalMatch(post.body);
+    while (it.hasNext()) {
+        QRegularExpressionMatch m = it.next();
+        headings.append(m.captured(0));
+    }
+    result["headings"] = QVariant::fromValue(headings);
+    return result;
 }
 
 void AppContext::scanTrash()
