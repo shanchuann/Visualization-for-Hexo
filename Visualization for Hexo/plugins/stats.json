@@ -1,0 +1,5 @@
+{
+  "name": "文章统计",
+  "description": "统计全站文章数量、总字数、分类分布、高频标签等信息",
+  "command": "node plugins/scripts/stats.js"
+}

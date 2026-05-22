@@ -1,0 +1,5 @@
+{
+  "name": "中文排版优化",
+  "description": "在中英文、中文与数字之间自动添加空格，提升排版质量（会直接修改文章）",
+  "command": "node plugins/scripts/pangu.js"
+}

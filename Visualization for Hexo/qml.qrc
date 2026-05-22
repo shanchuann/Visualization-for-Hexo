@@ -31,6 +31,9 @@
         <file>assets/iconpark/MeteorIconsSidebar.svg</file>
         <file>assets/iconpark/TablerLayoutBottombar.svg</file>
         <file>assets/iconpark/MaterialSymbolsAddCircleOutline.svg</file>
+        <file>assets/iconpark/search.svg</file>
+        <file>assets/iconpark/plug.svg</file>
+        <file>assets/iconpark/IconParkOutlineToolkit.svg</file>
         <file>qml/MainWindow.qml</file>
         <file>qml/PostList.qml</file>
         <file>qml/EditorHost.qml</file>
@@ -44,6 +47,20 @@
         <file>web/markdown-preview/vendor/markdown/markdown-it-task-lists.min.js</file>
         <file>web/markdown-preview/vendor/markdown/LICENSE-markdown-it.txt</file>
         <file>web/markdown-preview/vendor/markdown/LICENSE-markdown-it-task-lists.txt</file>
+    </qresource>
+    <qresource prefix="/plugins">
+        <file alias="check-links.json">plugins/check-links.json</file>
+        <file alias="drafts.json">plugins/drafts.json</file>
+        <file alias="image-audit.json">plugins/image-audit.json</file>
+        <file alias="pangu.json">plugins/pangu.json</file>
+        <file alias="seo-check.json">plugins/seo-check.json</file>
+        <file alias="stats.json">plugins/stats.json</file>
+        <file alias="scripts/check-links.js">plugins/scripts/check-links.js</file>
+        <file alias="scripts/drafts.js">plugins/scripts/drafts.js</file>
+        <file alias="scripts/image-audit.js">plugins/scripts/image-audit.js</file>
+        <file alias="scripts/pangu.js">plugins/scripts/pangu.js</file>
+        <file alias="scripts/seo-check.js">plugins/scripts/seo-check.js</file>
+        <file alias="scripts/stats.js">plugins/scripts/stats.js</file>
     </qresource>
     <qresource prefix="/preview">
         <file alias="index.html">web/markdown-preview/index.html</file>

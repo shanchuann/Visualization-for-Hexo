@@ -152,8 +152,16 @@ ApplicationWindow {
     property bool consoleVisible: false
     property bool consoleExpanded: true
     property bool aiKeyEditing: false
+    property bool sidebarSearchMode: false
+    property string sidebarSearchQuery: ""
     property var consoleCommandHistory: []
     property int consoleHistoryIndex: -1
+    property var backupHistory: []
+    property bool pluginDialogPending: false
+    property int pluginLogStart: 0
+    property string pluginDialogName: ""
+    property string pluginDialogDesc: ""
+    property int pluginDialogExitCode: -1
     property int settingsTabIndex: 0
     property int articleViewMode: 1 // 0: source, 1: preview
     property bool resizeDegrade: false
@@ -287,6 +295,14 @@ ApplicationWindow {
     onConsoleVisibleChanged: {
         if (consoleVisible) {
             consoleExpanded = true
+        }
+    }
+
+    onSidebarSearchModeChanged: {
+        if (!sidebarSearchMode) {
+            root.sidebarSearchQuery = ""
+        } else {
+            Qt.callLater(function() { searchInput.forceActiveFocus() })
         }
     }
 
@@ -1253,6 +1269,9 @@ ApplicationWindow {
         if (root.settingsTabIndex === 4) {
             appContext.scanTrash()
         }
+        if (root.settingsTabIndex === 2) {
+            root.backupHistory = appContext.gitLogSync(20)
+        }
     }
 
     Connections {
@@ -1269,6 +1288,41 @@ ApplicationWindow {
         function onOpenedPostChanged() {
             if (dateInput) {
                 dateInput.editText = appContext.openedPostDate
+            }
+        }
+    }
+
+    Connections {
+        target: appContext
+        function onLogTextChanged() {
+            if (root.pluginDialogPending) {
+                var rawOutput = appContext.logText.substring(root.pluginLogStart)
+                var lines = rawOutput.split('\n')
+                var cleanLines = lines.filter(function(l) {
+                    var t = l.trim()
+                    return t.length > 0
+                        && !l.startsWith('$ ')
+                        && !l.startsWith('[task finished]')
+                        && !/^[─\s]+$/.test(t)
+                })
+                pluginResultDialog.outputText = cleanLines.join('\n').trim()
+            }
+        }
+        function onTaskRunningChanged() {
+            if (!appContext.taskRunning && root.pluginDialogPending) {
+                root.pluginDialogPending = false
+                var rawOutput = appContext.logText.substring(root.pluginLogStart)
+                var exitMatch = rawOutput.match(/\[task finished\] exit=(-?\d+)/)
+                root.pluginDialogExitCode = exitMatch ? parseInt(exitMatch[1]) : -1
+                var lines = rawOutput.split('\n')
+                var cleanLines = lines.filter(function(l) {
+                    var t = l.trim()
+                    return t.length > 0
+                        && !l.startsWith('$ ')
+                        && !l.startsWith('[task finished]')
+                        && !/^[─\s]+$/.test(t)
+                })
+                pluginResultDialog.outputText = cleanLines.join('\n').trim()
             }
         }
     }
@@ -1371,6 +1425,18 @@ ApplicationWindow {
         interval: 2000
         repeat: false
         onTriggered: root.autoSaveStatus = ""
+    }
+
+    Timer {
+        id: searchDebounceTimer
+        interval: 280
+        repeat: false
+        onTriggered: {
+            var q = root.sidebarSearchQuery.trim()
+            if (q.length > 0) {
+                appContext.search(q)
+            }
+        }
     }
 
     // ======================== MD3 Top App Bar ========================
@@ -1613,6 +1679,50 @@ ApplicationWindow {
                                 color: root.md3OnSurface
                                 Layout.fillWidth: true
                                 Layout.alignment: Qt.AlignVCenter
+                                visible: !root.sidebarSearchMode
+                            }
+
+                            UiTextField {
+                                id: searchInput
+                                visible: root.sidebarSearchMode
+                                Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignVCenter
+                                height: root.inputHeight
+                                placeholderText: "搜索文章标题、内容..."
+                                onTextChanged: {
+                                    root.sidebarSearchQuery = text
+                                    searchDebounceTimer.restart()
+                                }
+                            }
+
+                            IconActionButton {
+                                Layout.alignment: Qt.AlignVCenter
+                                width: 28
+                                height: 28
+                                iconSource: root.iconBase + "search.svg"
+                                toolTipText: root.sidebarSearchMode ? "关闭搜索" : "搜索文章"
+                                background: Rectangle {
+                                    radius: root.shapeSmall
+                                    color: root.sidebarSearchMode
+                                        ? root.md3PrimaryContainer
+                                        : (parent.pressed
+                                            ? Qt.rgba(root.md3OnSurfaceVariant.r, root.md3OnSurfaceVariant.g, root.md3OnSurfaceVariant.b, 0.18)
+                                            : (parent.hovered ? root.hoverOverlay(true) : "transparent"))
+                                    Behavior on color { ColorAnimation { duration: 100 } }
+                                }
+                                contentItem: Item {
+                                    IconImage {
+                                        anchors.centerIn: parent
+                                        width: 15
+                                        height: 15
+                                        source: root.iconBase + (root.sidebarSearchMode ? "close.svg" : "search.svg")
+                                        color: root.sidebarSearchMode ? root.md3Primary : root.md3OnSurfaceVariant
+                                    }
+                                }
+                                onClicked: {
+                                    root.sidebarSearchMode = !root.sidebarSearchMode
+                                    if (!root.sidebarSearchMode) searchInput.text = ""
+                                }
                             }
                         }
                     }
@@ -1620,6 +1730,7 @@ ApplicationWindow {
                 // Posts list
                 ListView {
                     id: postsList
+                    visible: !root.sidebarSearchMode
                     property real quantizedWidth: Math.max(320, Math.round(width / 20) * 20)
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -1731,6 +1842,104 @@ ApplicationWindow {
                                         font.pixelSize: 13
                                         color: root.md3OnSurfaceVariant
                                         elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Search results (visible when search mode is active)
+                Item {
+                    visible: root.sidebarSearchMode
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: root.sidebarSearchQuery.trim().length === 0
+                        text: "请输入关键词搜索"
+                        font.pixelSize: 14
+                        color: root.md3OnSurfaceVariant
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: root.sidebarSearchQuery.trim().length > 0 && appContext.searchResults.length === 0
+                        text: "未找到相关文章"
+                        font.pixelSize: 14
+                        color: root.md3OnSurfaceVariant
+                    }
+
+                    ListView {
+                        id: searchResultsList
+                        anchors.fill: parent
+                        visible: root.sidebarSearchQuery.trim().length > 0 && appContext.searchResults.length > 0
+                        clip: true
+                        model: appContext.searchResults
+                        boundsBehavior: Flickable.StopAtBounds
+                        flickDeceleration: 13000
+                        maximumFlickVelocity: 6400
+                        ScrollBar.vertical: ListScrollBar {}
+
+                        delegate: Item {
+                            property var entry: modelData || ({})
+                            width: ListView.view.width
+                            height: 80
+
+                            MouseArea {
+                                id: searchItemMouse
+                                anchors.fill: parent
+                                hoverEnabled: !root.resizeDegrade
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (entry.path) {
+                                        appContext.openPost(entry.path)
+                                        root.sidebarSearchMode = false
+                                        searchInput.text = ""
+                                    }
+                                }
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 12
+                                    anchors.topMargin: 4
+                                    anchors.bottomMargin: 4
+                                    radius: root.shapeMedium
+                                    color: {
+                                        if (entry.path && entry.path === appContext.openedPostPath)
+                                            return root.sidePanelItem
+                                        if (searchItemMouse.containsMouse)
+                                            return Qt.rgba(root.md3OnSurface.r, root.md3OnSurface.g, root.md3OnSurface.b, 0.05)
+                                        return "transparent"
+                                    }
+                                    Behavior on color { ColorAnimation { duration: 100 } }
+
+                                    Item {
+                                        anchors.fill: parent
+                                        anchors.margins: 14
+
+                                        Text {
+                                            anchors.top: parent.top
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            text: entry.title || ""
+                                            font.pixelSize: 15
+                                            font.weight: entry.path === appContext.openedPostPath ? Font.DemiBold : Font.Normal
+                                            color: root.md3OnSurface
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Text {
+                                            anchors.bottom: parent.bottom
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            text: (entry.category || "") + (entry.tags && entry.tags.length ? " · " + entry.tags : "")
+                                            font.pixelSize: 13
+                                            color: root.md3OnSurfaceVariant
+                                            elide: Text.ElideRight
+                                        }
                                     }
                                 }
                             }
@@ -2503,11 +2712,11 @@ ApplicationWindow {
 
                             Repeater {
                                 model: [
-                                    { label: "文章设置", glyph: "文" },
-                                    { label: "站点设置", glyph: "站" },
-                                    { label: "系统设置", glyph: "系" },
-                                    { label: "信息统计", glyph: "统" },
-                                    { label: "回收站", glyph: "删" }
+                                    { label: "文章设置", icon: "edit.svg" },
+                                    { label: "站点设置", icon: "setting.svg" },
+                                    { label: "系统设置", icon: "code.svg" },
+                                    { label: "信息统计", icon: "preview-open.svg" },
+                                    { label: "回收站", icon: "delete.svg" }
                                 ]
                                 delegate: Rectangle {
                                     Layout.fillWidth: true
@@ -2536,11 +2745,11 @@ ApplicationWindow {
                                                 : root.md3PrimaryContainer
                                             anchors.horizontalCenter: parent.horizontalCenter
 
-                                            Text {
+                                            IconImage {
                                                 anchors.centerIn: parent
-                                                text: modelData.glyph
-                                                font.pixelSize: 13
-                                                font.weight: Font.DemiBold
+                                                width: 14
+                                                height: 14
+                                                source: root.iconBase + modelData.icon
                                                 color: root.settingsTabIndex === index
                                                     ? root.md3OnPrimary
                                                     : root.md3OnSurface
@@ -2986,6 +3195,208 @@ ApplicationWindow {
                                             appContext.aiApiKey = raw
                                         }
                                         root.aiKeyEditing = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ==================== 备份管理 Card ====================
+                    UiCard {
+                        visible: root.settingsTabIndex === 2
+                        Layout.fillWidth: true
+                        implicitHeight: backupCol.implicitHeight + 32
+
+                        Connections {
+                            target: appContext
+                            function onTaskRunningChanged() {
+                                if (!appContext.taskRunning && root.settingsTabIndex === 2)
+                                    root.backupHistory = appContext.gitLogSync(20)
+                            }
+                        }
+
+                        ColumnLayout {
+                            id: backupCol
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 16
+                            spacing: 12
+
+                            // Header row
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    text: "备份管理"
+                                    font.pixelSize: 16
+                                    font.weight: Font.DemiBold
+                                    color: root.md3OnSurface
+                                }
+                                Item { Layout.fillWidth: true }
+                                Rectangle {
+                                    readonly property bool ok: appContext.isGitRepo()
+                                    width: repoLabel.implicitWidth + 16
+                                    height: 22
+                                    radius: 11
+                                    color: ok ? "#E8F5E9" : "#FFF3E0"
+                                    Text {
+                                        id: repoLabel
+                                        anchors.centerIn: parent
+                                        text: parent.ok ? "Git 仓库 ✓" : "未初始化"
+                                        font.pixelSize: 11
+                                        font.weight: Font.Medium
+                                        color: parent.ok ? "#2E7D32" : "#E65100"
+                                    }
+                                }
+                            }
+
+                            // Init button shown only when not a git repo
+                            UiButton {
+                                visible: !appContext.isGitRepo()
+                                text: "初始化 Git 仓库"
+                                tone: "filled"
+                                Layout.fillWidth: true
+                                onClicked: {
+                                    appContext.gitInit()
+                                    root.consoleVisible = true
+                                }
+                            }
+
+                            // Remote URL row
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                UiTextField {
+                                    id: remoteUrlInput
+                                    Layout.fillWidth: true
+                                    placeholderText: "远端地址（https://github.com/user/blog.git）"
+                                    Component.onCompleted: text = appContext.gitGetRemote()
+                                }
+                                UiButton {
+                                    text: "设置"
+                                    compact: true
+                                    implicitWidth: 56
+                                    onClicked: appContext.gitSetRemote(remoteUrlInput.text)
+                                }
+                            }
+
+                            // Backup + Push row
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                UiButton {
+                                    text: "立即备份"
+                                    tone: "filled"
+                                    Layout.fillWidth: true
+                                    onClicked: {
+                                        appContext.backupNow("")
+                                        root.consoleVisible = true
+                                    }
+                                }
+                                UiButton {
+                                    text: "推送到远端"
+                                    Layout.fillWidth: true
+                                    onClicked: {
+                                        appContext.gitPush()
+                                        root.consoleVisible = true
+                                    }
+                                }
+                            }
+
+                            // History section header
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 4
+                                Text {
+                                    text: "备份记录"
+                                    font.pixelSize: 13
+                                    font.weight: Font.Medium
+                                    color: root.md3OnSurface
+                                }
+                                Item { Layout.fillWidth: true }
+                                IconActionButton {
+                                    width: 24; height: 24
+                                    iconSource: root.iconBase + "play.svg"
+                                    toolTipText: "刷新记录"
+                                    onClicked: root.backupHistory = appContext.gitLogSync(20)
+                                }
+                            }
+
+                            // Empty state
+                            Text {
+                                visible: root.backupHistory.length === 0
+                                text: "暂无备份记录"
+                                color: root.md3OnSurfaceVariant
+                                font.pixelSize: 13
+                                Layout.alignment: Qt.AlignHCenter
+                                Layout.topMargin: 4
+                                Layout.bottomMargin: 4
+                            }
+
+                            // History list
+                            Repeater {
+                                model: root.backupHistory
+                                delegate: Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 54
+                                    radius: root.shapeMedium
+                                    color: index % 2 === 0
+                                        ? root.md3SurfaceContainerLowest
+                                        : "transparent"
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 6
+                                        spacing: 8
+
+                                        Rectangle {
+                                            width: 56; height: 22; radius: 6
+                                            color: root.md3SurfaceContainerHigh
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: modelData.hash
+                                                font.family: "Consolas, Courier New"
+                                                font.pixelSize: 11
+                                                color: root.md3Primary
+                                            }
+                                        }
+
+                                        Column {
+                                            Layout.fillWidth: true
+                                            spacing: 2
+                                            Text {
+                                                text: modelData.message
+                                                font.pixelSize: 13
+                                                color: root.md3OnSurface
+                                                elide: Text.ElideRight
+                                                width: parent.width
+                                            }
+                                            Text {
+                                                text: modelData.date
+                                                font.pixelSize: 11
+                                                color: root.md3OnSurfaceVariant
+                                            }
+                                        }
+
+                                        UiButton {
+                                            text: "恢复"
+                                            tone: "outlined"
+                                            compact: true
+                                            onClicked: {
+                                                root.showConfirmDialog(
+                                                    "恢复文章",
+                                                    "将 source/_posts/ 中的文章恢复到 " + modelData.hash
+                                                        + " 版本？\n\n当前未提交的修改将丢失，请先备份。",
+                                                    "恢复",
+                                                    true,
+                                                    function() {
+                                                        appContext.gitRestorePosts(modelData.fullHash)
+                                                        root.consoleVisible = true
+                                                    }
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3648,6 +4059,221 @@ ApplicationWindow {
         }
     }
 
+    // ======================== Plugin Management Drawer ========================
+    Drawer {
+        id: pluginDrawer
+        edge: Qt.RightEdge
+        y: titleBar.height
+        width: 400
+        height: root.height - titleBar.height
+
+        Rectangle {
+            anchors.fill: parent
+            color: root.md3Surface
+
+            Flickable {
+                anchors.fill: parent
+                contentWidth: width
+                contentHeight: pluginPanelContent.implicitHeight + 60
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                flickDeceleration: 10000
+                ScrollBar.vertical: PageScrollBar {}
+
+                ColumnLayout {
+                    id: pluginPanelContent
+                    width: parent.width - 48
+                    x: 24
+                    y: 24
+                    height: implicitHeight
+                    spacing: 20
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        IconImage {
+                            width: 20
+                            height: 20
+                            source: root.iconBase + "plug.svg"
+                            color: root.md3Primary
+                        }
+
+                        Text {
+                            text: "插件管理"
+                            font.pixelSize: 22
+                            font.weight: Font.Medium
+                            color: root.md3OnSurface
+                            Layout.fillWidth: true
+                        }
+
+                        UiButton {
+                            text: "重载"
+                            tone: "outlined"
+                            compact: true
+                            onClicked: appContext.loadPlugins()
+                        }
+
+                        IconActionButton {
+                            iconSource: root.iconBase + "close.svg"
+                            toolTipText: "关闭"
+                            onClicked: pluginDrawer.close()
+                        }
+                    }
+
+                    Text {
+                        text: "插件目录：{项目路径}/plugins/*.json"
+                        font.pixelSize: 12
+                        color: root.md3OnSurfaceVariant
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    UiCard {
+                        visible: appContext.plugins.length === 0
+                        Layout.fillWidth: true
+                        implicitHeight: 88
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "当前项目未检测到插件\n请在项目的 plugins/ 目录下放置 .json 插件定义文件"
+                            font.pixelSize: 13
+                            color: root.md3OnSurfaceVariant
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.WordWrap
+                            width: parent.width - 32
+                        }
+                    }
+
+                    UiCard {
+                        visible: appContext.plugins.length > 0
+                        Layout.fillWidth: true
+                        color: root.md3SurfaceContainer
+                        implicitHeight: Math.max(80, pluginPanelListView.contentHeight + 16)
+
+                        ListView {
+                            id: pluginPanelListView
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            clip: true
+                            model: appContext.plugins
+                            boundsBehavior: Flickable.StopAtBounds
+                            spacing: 6
+                            interactive: false
+
+                            delegate: Rectangle {
+                                property var plugin: modelData || ({})
+                                width: ListView.view.width
+                                height: pluginItemCol.implicitHeight + 24
+                                radius: root.shapeSmall
+                                color: root.md3SurfaceContainerLow
+
+                                ColumnLayout {
+                                    id: pluginItemCol
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 12
+                                    spacing: 6
+
+                                    Item {
+                                        Layout.fillWidth: true
+                                        implicitHeight: 20
+
+                                        Text {
+                                            anchors.left: parent.left
+                                            anchors.right: pluginStateBadge.left
+                                            anchors.rightMargin: 8
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: plugin.name || "未命名插件"
+                                            font.pixelSize: 14
+                                            font.weight: Font.DemiBold
+                                            color: root.md3OnSurface
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Rectangle {
+                                            id: pluginStateBadge
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 52
+                                            height: 20
+                                            radius: 10
+                                            color: plugin.state === "loaded"
+                                                ? root.md3PrimaryContainer
+                                                : root.md3SurfaceContainerHigh
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: plugin.state === "loaded" ? "已加载" : "未加载"
+                                                font.pixelSize: 11
+                                                font.weight: Font.Medium
+                                                color: plugin.state === "loaded"
+                                                    ? root.md3Primary
+                                                    : root.md3OnSurfaceVariant
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        visible: (plugin.description || "").length > 0
+                                        text: plugin.description || ""
+                                        font.pixelSize: 12
+                                        color: root.md3OnSurfaceVariant
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 6
+
+                                        UiButton {
+                                            text: "运行"
+                                            tone: "tonal"
+                                            compact: true
+                                            enabled: !appContext.taskRunning
+                                            onClicked: {
+                                                root.pluginLogStart = appContext.logText.length
+                                                root.pluginDialogName = plugin.name || "插件"
+                                                root.pluginDialogDesc = plugin.description || ""
+                                                root.pluginDialogExitCode = -2
+                                                root.pluginDialogPending = true
+                                                pluginResultDialog.outputText = ""
+                                                pluginResultDialog.open()
+                                                appContext.runPlugin(plugin.name || "")
+                                            }
+                                        }
+
+                                        UiButton {
+                                            visible: plugin.state === "loaded"
+                                            text: "卸载"
+                                            tone: "outlined"
+                                            compact: true
+                                            onClicked: appContext.unloadPlugin(plugin.name || "")
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Text {
+                                            visible: (plugin.command || "").length > 0
+                                            text: plugin.command || ""
+                                            font.pixelSize: 11
+                                            font.family: "Consolas, Courier New, monospace"
+                                            color: root.md3OnSurfaceVariant
+                                            elide: Text.ElideRight
+                                            Layout.maximumWidth: 160
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     SpeedDialFab {
         id: speedDialFab
         anchors.right: parent.right
@@ -3656,8 +4282,159 @@ ApplicationWindow {
         anchors.bottomMargin: 18
         hasOpenedPost: appContext.openedPostPath.length > 0
         settingsDrawerOpen: settingsDrawer.opened
+        pluginDrawerOpen: pluginDrawer.opened
         onAddArticleRequested: appContext.newPost("新文章", "未分类", "新标签")
         onAiEditRequested: root.enterAiEditMode()
+        onPluginManagementRequested: {
+            appContext.loadPlugins()
+            pluginDrawer.open()
+        }
+    }
+
+    // ======================== Plugin Result Dialog ========================
+    Dialog {
+        id: pluginResultDialog
+        property string outputText: ""
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        standardButtons: Dialog.NoButton
+        padding: 0
+        implicitWidth: 560
+
+        onClosed: root.pluginDialogPending = false
+
+        background: Rectangle {
+            radius: root.shapeLarge
+            color: root.md3SurfaceContainerLowest
+            border.width: 1
+            border.color: root.md3OutlineVariant
+        }
+
+        contentItem: Item {
+            implicitWidth: 560
+            implicitHeight: pluginResultCol.implicitHeight + 40
+
+            ColumnLayout {
+                id: pluginResultCol
+                width: parent.implicitWidth - 40
+                anchors.centerIn: parent
+                spacing: 16
+
+                // Section 1: 插件信息
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+                    Text {
+                        text: root.pluginDialogName
+                        font.pixelSize: 17
+                        font.weight: Font.DemiBold
+                        color: root.md3OnSurface
+                    }
+                    Text {
+                        visible: root.pluginDialogDesc.length > 0
+                        text: root.pluginDialogDesc
+                        font.pixelSize: 13
+                        color: root.md3OnSurfaceVariant
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: root.md3OutlineVariant; opacity: 0.5 }
+
+                // Section 2: 过程信息
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Text {
+                        text: "过程信息"
+                        font.pixelSize: 12
+                        font.weight: Font.Medium
+                        color: root.md3OnSurfaceVariant
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 240
+                        radius: root.shapeSmall
+                        color: root.md3SurfaceContainer
+                        clip: true
+
+                        Flickable {
+                            id: pluginOutputFlickable
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            contentWidth: width
+                            contentHeight: pluginOutputText.implicitHeight
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            ScrollBar.vertical: PageScrollBar {}
+                            onContentHeightChanged: {
+                                if (root.pluginDialogPending)
+                                    contentY = Math.max(0, contentHeight - height)
+                            }
+
+                            Text {
+                                id: pluginOutputText
+                                width: parent.width
+                                text: pluginResultDialog.outputText
+                                font.pixelSize: 12
+                                font.family: "Consolas, Courier New, monospace"
+                                color: root.md3OnSurface
+                                wrapMode: Text.WrapAnywhere
+                                textFormat: Text.PlainText
+                                lineHeight: 1.4
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: root.md3OutlineVariant; opacity: 0.5 }
+
+                // Section 3: 结果
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Text {
+                        text: "结果"
+                        font.pixelSize: 12
+                        font.weight: Font.Medium
+                        color: root.md3OnSurfaceVariant
+                    }
+                    Rectangle {
+                        implicitWidth: pluginStatusText.implicitWidth + 16
+                        height: 22
+                        radius: 11
+                        color: root.pluginDialogPending
+                            ? Qt.rgba(root.md3OnSurfaceVariant.r, root.md3OnSurfaceVariant.g,
+                                      root.md3OnSurfaceVariant.b, 0.14)
+                            : (root.pluginDialogExitCode === 0
+                                ? root.md3PrimaryContainer
+                                : root.md3ErrorContainer)
+                        Text {
+                            id: pluginStatusText
+                            anchors.centerIn: parent
+                            text: root.pluginDialogPending
+                                ? "运行中..."
+                                : (root.pluginDialogExitCode === 0
+                                    ? "执行成功"
+                                    : ("执行失败  exit=" + root.pluginDialogExitCode))
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                            color: root.pluginDialogPending
+                                ? root.md3OnSurfaceVariant
+                                : (root.pluginDialogExitCode === 0 ? root.md3Primary : root.md3Error)
+                        }
+                    }
+                    Item { Layout.fillWidth: true }
+                    UiButton {
+                        text: "关闭"
+                        tone: "tonal"
+                        compact: true
+                        onClicked: pluginResultDialog.close()
+                    }
+                }
+            }
+        }
     }
 
     Dialog {

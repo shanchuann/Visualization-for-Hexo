@@ -1,0 +1,5 @@
+{
+  "name": "SEO 检查",
+  "description": "逐篇检查文章是否缺少 description、tags、categories 等 SEO 字段",
+  "command": "node plugins/scripts/seo-check.js"
+}

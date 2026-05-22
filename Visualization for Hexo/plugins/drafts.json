@@ -1,0 +1,5 @@
+{
+  "name": "草稿管理",
+  "description": "列出 source/_drafts/ 中所有草稿的标题、字数和修改时间",
+  "command": "node plugins/scripts/drafts.js"
+}

@@ -350,8 +350,8 @@ AppContext::AppContext(QObject *parent)
     });
     connect(m_command, &CommandAdapter::commandFinished, this, [this](int exitCode, bool crashed) {
         m_taskRunning = false;
-        emit taskRunningChanged();
         appendLog(QString("[task finished] exit=%1 crashed=%2").arg(exitCode).arg(crashed ? "true" : "false"));
+        emit taskRunningChanged();
         m_pendingPreviewOpen = false;
         m_previewOpened = false;
     });
@@ -1096,6 +1096,81 @@ void AppContext::gitCommit(const QString &message)
 }
 void AppContext::gitPush() { runCommand("git push"); }
 
+bool AppContext::isGitRepo() const
+{
+    if (m_currentProjectPath.isEmpty()) return false;
+    return QDir(QDir(m_currentProjectPath).filePath(".git")).exists();
+}
+
+void AppContext::gitInit()
+{
+    runCommand("git init");
+}
+
+void AppContext::backupNow(const QString &message)
+{
+    QString msg = message.trimmed().isEmpty()
+        ? QString("backup: %1").arg(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"))
+        : message.trimmed();
+    msg.replace('"', '\'');
+    runCommand(QString("git add . && git commit -m \"%1\"").arg(msg));
+}
+
+QVariantList AppContext::gitLogSync(int count) const
+{
+    if (m_currentProjectPath.isEmpty()) return {};
+    QProcess proc;
+    proc.setWorkingDirectory(m_currentProjectPath);
+    proc.start("git", {"log", "--format=%H\t%s\t%ai\t%an", QString("-n%1").arg(count)});
+    if (!proc.waitForFinished(5000)) return {};
+
+    QVariantList result;
+    const QList<QByteArray> rawLines = proc.readAllStandardOutput().split('\n');
+    for (const QByteArray &raw : rawLines) {
+        const QString line = QString::fromUtf8(raw).trimmed();
+        if (line.isEmpty()) continue;
+        const QStringList parts = line.split('\t');
+        if (parts.isEmpty()) continue;
+        QVariantMap entry;
+        entry["hash"]     = parts[0].left(7);
+        entry["fullHash"] = parts[0];
+        entry["message"]  = parts.size() > 1 ? parts[1] : "";
+        entry["date"]     = parts.size() > 2 ? parts[2].left(16) : "";
+        entry["author"]   = parts.size() > 3 ? parts[3] : "";
+        result.append(entry);
+    }
+    return result;
+}
+
+QString AppContext::gitGetRemote() const
+{
+    if (m_currentProjectPath.isEmpty()) return {};
+    QProcess proc;
+    proc.setWorkingDirectory(m_currentProjectPath);
+    proc.start("git", {"remote", "get-url", "origin"});
+    proc.waitForFinished(3000);
+    return QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+}
+
+void AppContext::gitSetRemote(const QString &url)
+{
+    const QString u = url.trimmed();
+    if (u.isEmpty()) return;
+    const QString safe = QString(u).replace('"', '\'');
+    runCommand(QString("git remote set-url origin \"%1\" || git remote add origin \"%1\"").arg(safe));
+}
+
+void AppContext::gitRestorePosts(const QString &commitHash)
+{
+    const QString hash = commitHash.trimmed();
+    static const QRegularExpression re(QStringLiteral("^[0-9a-f]{4,40}$"));
+    if (!re.match(hash).hasMatch()) {
+        appendLog("[git] invalid commit hash");
+        return;
+    }
+    runCommand(QString("git checkout %1 -- source/_posts").arg(hash));
+}
+
 void AppContext::rebuildSearchIndex()
 {
     if (!rebuildSqliteIndex()) {
@@ -1145,6 +1220,41 @@ void AppContext::search(const QString &query)
     emit searchResultsChanged();
 }
 
+void AppContext::seedBuiltinPlugins(const QString &projectPath)
+{
+    QDir pluginDir(QDir(projectPath).filePath("plugins"));
+    pluginDir.mkpath(".");
+    pluginDir.mkpath("scripts");
+
+    static const QStringList jsonNames = {
+        "check-links.json", "drafts.json", "image-audit.json",
+        "pangu.json", "seo-check.json", "stats.json"
+    };
+    static const QStringList jsNames = {
+        "check-links.js", "drafts.js", "image-audit.js",
+        "pangu.js", "seo-check.js", "stats.js"
+    };
+
+    for (const QString &name : jsonNames) {
+        QString dest = pluginDir.filePath(name);
+        if (!QFile::exists(dest)) {
+            QFile::copy(":/plugins/" + name, dest);
+            QFile::setPermissions(dest, QFileDevice::ReadOwner | QFileDevice::WriteOwner |
+                                            QFileDevice::ReadGroup | QFileDevice::ReadOther);
+        }
+    }
+
+    QDir scriptsDir(pluginDir.filePath("scripts"));
+    for (const QString &name : jsNames) {
+        QString dest = scriptsDir.filePath(name);
+        if (!QFile::exists(dest)) {
+            QFile::copy(":/plugins/scripts/" + name, dest);
+            QFile::setPermissions(dest, QFileDevice::ReadOwner | QFileDevice::WriteOwner |
+                                            QFileDevice::ReadGroup | QFileDevice::ReadOther);
+        }
+    }
+}
+
 void AppContext::loadPlugins()
 {
     m_plugins.clear();
@@ -1153,11 +1263,9 @@ void AppContext::loadPlugins()
         return;
     }
 
+    seedBuiltinPlugins(m_currentProjectPath);
+
     QDir pluginDir(QDir(m_currentProjectPath).filePath("plugins"));
-    if (!pluginDir.exists()) {
-        emit pluginsChanged();
-        return;
-    }
 
     QStringList files = pluginDir.entryList(QStringList() << "*.json", QDir::Files);
     for (const QString &file : files) {

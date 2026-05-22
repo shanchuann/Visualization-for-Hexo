@@ -1,0 +1,5 @@
+{
+  "name": "图片审计",
+  "description": "统计 source/images/ 下的图片大小，找出大图和未被引用的图片",
+  "command": "node plugins/scripts/image-audit.js"
+}

@@ -6,6 +6,7 @@ Item {
     property bool expanded: false
     property bool hasOpenedPost: false
     property bool settingsDrawerOpen: false
+    property bool pluginDrawerOpen: false
     readonly property string iconBase: "qrc:/qt/qml/visualization for hexo/assets/iconpark/"
 
     // Theme tokens (match project style)
@@ -16,10 +17,11 @@ Item {
 
     signal addArticleRequested()
     signal aiEditRequested()
+    signal pluginManagementRequested()
 
-    visible: !settingsDrawerOpen
+    visible: !settingsDrawerOpen && !pluginDrawerOpen
     width: 80
-    height: expanded ? 240 : 72
+    height: expanded ? 300 : 72
     z: 5
 
     function collapse() { expanded = false }
@@ -54,6 +56,66 @@ Item {
         anchors.bottomMargin: -2000
         z: -1
         onClicked: root.collapse()
+    }
+
+    // Sub-FAB: Plugin Management (topmost)
+    Rectangle {
+        id: pluginFab
+        anchors.horizontalCenter: mainFab.horizontalCenter
+        width: 44
+        height: 44
+        radius: 22
+        color: root.md3Primary
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.24)
+        visible: root.expanded
+        scale: root.expanded ? 1 : 0
+        opacity: root.expanded ? 1 : 0
+        y: mainFab.y - 180
+
+        Behavior on scale { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -1
+            anchors.topMargin: 2
+            z: -1
+            radius: 22
+            color: Qt.rgba(0, 0, 0, 0.10)
+        }
+
+        IconImage {
+            anchors.centerIn: parent
+            width: 20
+            height: 20
+            source: root.iconBase + "plug.svg"
+            color: "#FFFFFF"
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 22
+            color: "#FFFFFF"
+            opacity: pluginFabMouse.containsMouse ? 0.18 : 0
+            Behavior on opacity { NumberAnimation { duration: 100 } }
+        }
+
+        MouseArea {
+            id: pluginFabMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                root.collapse()
+                root.pluginManagementRequested()
+            }
+        }
+
+        StyledTip {
+            visible: pluginFabMouse.containsMouse
+            text: "插件管理"
+        }
     }
 
     // Sub-FAB: AI Edit (topmost when expanded)
@@ -208,7 +270,7 @@ Item {
             anchors.centerIn: parent
             width: 22
             height: 22
-            source: root.expanded ? (root.iconBase + "close-white.svg") : (root.iconBase + "toolbox.svg")
+            source: root.expanded ? (root.iconBase + "close-white.svg") : (root.iconBase + "IconParkOutlineToolkit.svg")
             color: "#FFFFFF"
             opacity: 1
             Behavior on source {

@@ -1,0 +1,5 @@
+{
+  "name": "死链检查",
+  "description": "扫描所有文章中的外部链接，通过 HTTP HEAD 请求检测是否有效",
+  "command": "node plugins/scripts/check-links.js"
+}

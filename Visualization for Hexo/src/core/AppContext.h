@@ -119,6 +119,13 @@ public:
     Q_INVOKABLE void gitAddAll();
     Q_INVOKABLE void gitCommit(const QString &message);
     Q_INVOKABLE void gitPush();
+    Q_INVOKABLE bool isGitRepo() const;
+    Q_INVOKABLE void gitInit();
+    Q_INVOKABLE void backupNow(const QString &message = QString());
+    Q_INVOKABLE QVariantList gitLogSync(int count = 20) const;
+    Q_INVOKABLE QString gitGetRemote() const;
+    Q_INVOKABLE void gitSetRemote(const QString &url);
+    Q_INVOKABLE void gitRestorePosts(const QString &commitHash);
 
     Q_INVOKABLE void rebuildSearchIndex();
     Q_INVOKABLE void search(const QString &query);
@@ -232,6 +239,7 @@ private:
     void setOpenedPost(const PostData &post);
     void clearOpenedPost();
     void reloadAllProjectBoundData();
+    void seedBuiltinPlugins(const QString &projectPath);
     void loadAiConfig();
     void saveAiConfig() const;
     QString generateDescriptionWithGlm(const QString &title, const QString &body);
