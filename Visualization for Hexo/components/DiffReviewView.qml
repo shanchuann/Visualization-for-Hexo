@@ -176,7 +176,7 @@ Flickable {
 
                                 IconImage {
                                     anchors.centerIn: parent
-                                    source: root.iconBase + "check.svg"
+                                    source: root.iconBase + "check.png"
                                     width: 14; height: 14
                                     color: isAccepted ? "#0F5C2C" : root.md3OnSurfaceVariant
                                 }
@@ -197,7 +197,7 @@ Flickable {
 
                                 IconImage {
                                     anchors.centerIn: parent
-                                    source: root.iconBase + "close.svg"
+                                    source: root.iconBase + "close.png"
                                     width: 14; height: 14
                                     color: (isDecided && !isAccepted) ? root.md3Error : root.md3OnSurfaceVariant
                                 }

@@ -1,12 +1,12 @@
 <p align="center">
-	<img src="https://files.seeusercontent.com/2026/04/30/Qz7x/Visualization-for-Hexo-1.png" alt="Visualization for Hexo" />
-	
+	<img src="https://files.seeusercontent.com/2026/04/30/Qz7x/Visualization-for-Hexo-1.png" alt="BlueSheep" />
+
 </p>
 
-<h1 align="center">Hexo 框架博客可视化</h1>
+<h1 align="center">BlueSheep · 蓝羊羊</h1>
 
 <p align="center">
-	<img src="https://img.shields.io/badge/project-Visualization_for_Hexo-4c566a" alt="project" />
+	<img src="https://img.shields.io/badge/project-BlueSheep-4c566a" alt="project" />
 	<img src="https://img.shields.io/badge/stack-Qt%20%2B%20QML-0f766e" alt="qt-qml" />
 	<img src="https://img.shields.io/badge/blog-Hexo-2563eb" alt="hexo" />
 	<img src="https://img.shields.io/badge/platform-Windows-0ea5e9" alt="windows" />
@@ -14,7 +14,7 @@
 </p>
 
 
-一个基于 Qt/QML 的 Hexo 可视化管理工具，面向本地博客内容编辑与发布流程。
+BlueSheep（蓝羊羊）—— 一个基于 Qt/QML 的 Hexo 可视化管理工具，面向本地博客内容编辑与发布流程。
 
 ## 功能概览
 
@@ -24,7 +24,6 @@
 - 创建新文章（指定标题、分类、标签）
 - 删除文章（移入回收站，可恢复）
 - 回收站管理 — 恢复、永久删除、清空回收站，自动清理过期条目
-- 文章全文搜索（基于 SQLite 索引）
 
 ### 编辑器
 
@@ -54,11 +53,6 @@
 - 站点配置编辑（`_config.yml`）— 可视化编辑标题、描述、关键词、作者、语言、部署方式等
 - 主题配置编辑 — 直接修改当前主题的配置文件
 - 配置项中文翻译映射，便于理解
-
-### Git 集成
-
-- Git 状态查看、一键 `add all`、提交、推送
-- 发布前自动检查 Git 环境
 
 ### 多项目管理
 

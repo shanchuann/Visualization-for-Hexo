@@ -19,7 +19,8 @@ public:
         QString path = url.path(); // leading '/...'
         if (path.startsWith('/')) path.remove(0, 1);
         if (path.isEmpty()) path = "index.html";
-        const QString qrcPath = QStringLiteral(":/preview/%1").arg(path);
+        const QString prefix = (url.host() == QStringLiteral("ball")) ? QStringLiteral("ball") : QStringLiteral("preview");
+        const QString qrcPath = QStringLiteral(":/%1/%2").arg(prefix, path);
 
         qDebug() << "[PreviewSchemeHandler] requestStarted:" << job->requestUrl().toString() << "->" << qrcPath;
 

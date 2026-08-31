@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Emotion Ball</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+  }
+  #bot {
+    width: 100%;
+    height: 100%;
+  }
+</style>
+</head>
+<body>
+<script src="js/rings.js"></script>
+<script src="js/emotions.js"></script>
+<script src="js/ball.js"></script>
+<script src="js/engine.js"></script>
+
+<div id="bot"></div>
+
+<script>
+  var __ball = EmotionBall.create(document.getElementById('bot'), {
+    emotion: '02',
+    shape: 'blob',
+    idle: false,
+    eyeScale: 1.2,
+    lite: true
+  });
+
+  // Bridge API exposed to the Qt host via runJavaScript
+  window.ballSetEmotion = function (id) { try { __ball.setEmotion(String(id)); return true; } catch (e) { return false; } };
+  window.ballWake = function () { try { __ball.setEmotion('07'); return true; } catch (e) { return false; } };
+  window.ballBounce = function () { try { __ball.bounce(); return true; } catch (e) { return false; } };
+  window.ballBurst = function () { try { __ball.burst(16); return true; } catch (e) { return false; } };
+  window.ballSpin = function () { try { __ball.spin(2); return true; } catch (e) { return false; } };
+  window.ballHandleAI = function (msg) { try { __ball.handleAIMessage(msg); return true; } catch (e) { return false; } };
+  window.ballReady = true;
+</script>
+</body>
+</html>

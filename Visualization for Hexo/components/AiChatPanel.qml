@@ -253,7 +253,7 @@ Rectangle {
                 spacing: 8
 
                 TipButton {
-                    iconSource: root.iconBase + "up.svg"
+                    iconSource: root.iconBase + "up.png"
                     iconSize: 16
                     iconRotation: -90
                     tipText: "返回"
@@ -270,7 +270,7 @@ Rectangle {
                 }
 
                 TipButton {
-                    iconSource: root.showHistory ? (root.iconBase + "plus.svg") : (root.iconBase + "menu.svg")
+                    iconSource: root.showHistory ? (root.iconBase + "plus.png") : (root.iconBase + "menu.png")
                     tipText: root.showHistory ? "新建对话" : "对话历史"
                     onClicked: {
                         if (root.showHistory) {
@@ -283,7 +283,7 @@ Rectangle {
                 }
 
                 TipButton {
-                    iconSource: root.iconBase + "close.svg"
+                    iconSource: root.iconBase + "close.png"
                     tipText: "关闭"
                     onClicked: root.closeRequested()
                 }
@@ -311,7 +311,7 @@ Rectangle {
                     Column {
                         anchors.centerIn: parent; spacing: 8
                         visible: chatModel.count === 0 && !(aiSession && aiSession.streaming)
-                        IconImage { anchors.horizontalCenter: parent.horizontalCenter; source: root.iconBase + "ai-magic.svg"; width: 32; height: 32; color: root.md3OnSurfaceVariant; opacity: 0.5 }
+                        IconImage { anchors.horizontalCenter: parent.horizontalCenter; source: root.iconBase + "ai-magic.png"; width: 32; height: 32; color: root.md3OnSurfaceVariant; opacity: 0.5 }
                         Text { anchors.horizontalCenter: parent.horizontalCenter; text: "开始与 AI 对话"; font.pixelSize: 14; font.weight: Font.Medium; color: root.md3OnSurface }
                         Text { anchors.horizontalCenter: parent.horizontalCenter; text: "描述你想做的修改，例如「优化开头」"; font.pixelSize: 12; color: root.md3OnSurfaceVariant }
                     }
@@ -351,7 +351,7 @@ Rectangle {
                                     Row {
                                         id: thinkingRow; anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 6
                                         visible: !streamBubbleCol.hasText
-                                        IconImage { anchors.verticalCenter: parent.verticalCenter; source: root.iconBase + "ai-magic.svg"; width: 14; height: 14; color: root.md3OnSurfaceVariant; opacity: 0.35 }
+                                        IconImage { anchors.verticalCenter: parent.verticalCenter; source: root.iconBase + "ai-magic.png"; width: 14; height: 14; color: root.md3OnSurfaceVariant; opacity: 0.35 }
                                         Text { anchors.verticalCenter: parent.verticalCenter; text: "AI 思考中"; font.pixelSize: 13; color: root.md3OnSurfaceVariant; opacity: 0.5 }
                                         Row {
                                             anchors.verticalCenter: parent.verticalCenter; spacing: 3
@@ -579,7 +579,7 @@ Rectangle {
                     Column {
                         anchors.centerIn: parent; spacing: 8
                         visible: root.conversationList.length === 0
-                        IconImage { anchors.horizontalCenter: parent.horizontalCenter; source: root.iconBase + "menu.svg"; width: 32; height: 32; color: root.md3OnSurfaceVariant; opacity: 0.4 }
+                        IconImage { anchors.horizontalCenter: parent.horizontalCenter; source: root.iconBase + "menu.png"; width: 32; height: 32; color: root.md3OnSurfaceVariant; opacity: 0.4 }
                         Text { anchors.horizontalCenter: parent.horizontalCenter; text: "暂无对话历史"; font.pixelSize: 14; font.weight: Font.Medium; color: root.md3OnSurface }
                         Text { anchors.horizontalCenter: parent.horizontalCenter; text: "开始与 AI 对话后将自动保存"; font.pixelSize: 12; color: root.md3OnSurfaceVariant }
                     }
@@ -616,7 +616,7 @@ Rectangle {
 
                                 // AI icon
                                 IconImage {
-                                    source: root.iconBase + "ai-magic.svg"
+                                    source: root.iconBase + "ai-magic.png"
                                     width: 18; height: 18
                                     color: root.md3OnSurfaceVariant
                                     opacity: 0.5
@@ -701,7 +701,7 @@ Rectangle {
 
                                 // Rename button
                                 TipButton {
-                                    iconSource: root.iconBase + "edit.svg"
+                                    iconSource: root.iconBase + "edit.png"
                                     tipText: "重命名"
                                     z: 1
                                     onClicked: {
@@ -713,7 +713,7 @@ Rectangle {
 
                                 // Delete button
                                 TipButton {
-                                    iconSource: root.iconBase + "delete.svg"
+                                    iconSource: root.iconBase + "delete.png"
                                     tipText: "删除对话"
                                     danger: true
                                     z: 1

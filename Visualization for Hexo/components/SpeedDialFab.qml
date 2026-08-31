@@ -7,6 +7,8 @@ Item {
     property bool hasOpenedPost: false
     property bool settingsDrawerOpen: false
     property bool pluginDrawerOpen: false
+    property bool sidebarVisible: true
+    property bool isMarkdownView: true
     readonly property string iconBase: "qrc:/qt/qml/visualization for hexo/assets/iconpark/"
 
     // Theme tokens (match project style)
@@ -18,10 +20,12 @@ Item {
     signal addArticleRequested()
     signal aiEditRequested()
     signal pluginManagementRequested()
+    signal sidebarToggleRequested()
+    signal viewModeToggleRequested()
 
     visible: !settingsDrawerOpen && !pluginDrawerOpen
     width: 80
-    height: expanded ? 300 : 72
+    height: expanded ? 420 : 72
     z: 5
 
     function collapse() { expanded = false }
@@ -89,7 +93,7 @@ Item {
             anchors.centerIn: parent
             width: 20
             height: 20
-            source: root.iconBase + "plug.svg"
+            source: root.iconBase + "plug.png"
             color: "#FFFFFF"
         }
 
@@ -150,7 +154,7 @@ Item {
             anchors.centerIn: parent
             width: 20
             height: 20
-            source: root.iconBase + "ai-magic.svg"
+            source: root.iconBase + "ai-magic.png"
             color: "#FFFFFF"
         }
 
@@ -213,7 +217,7 @@ Item {
             anchors.centerIn: parent
             width: 20
             height: 20
-            source: root.iconBase + "plus.svg"
+            source: root.iconBase + "plus.png"
             color: "#FFFFFF"
         }
 
@@ -239,6 +243,126 @@ Item {
         StyledTip {
             visible: addArticleMouse.containsMouse
             text: "新增文章"
+        }
+    }
+
+    // Sub-FAB: View Mode (source / preview)
+    Rectangle {
+        id: viewModeFab
+        anchors.horizontalCenter: mainFab.horizontalCenter
+        width: 44
+        height: 44
+        radius: 22
+        color: root.md3Primary
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.24)
+        visible: root.expanded
+        scale: root.expanded ? 1 : 0
+        opacity: root.expanded ? 1 : 0
+        y: mainFab.y - 240
+
+        Behavior on scale { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -1
+            anchors.topMargin: 2
+            z: -1
+            radius: 22
+            color: Qt.rgba(0, 0, 0, 0.10)
+        }
+
+        IconImage {
+            anchors.centerIn: parent
+            width: 20
+            height: 20
+            source: root.iconBase + (root.isMarkdownView ? "code.png" : "preview-open.png")
+            color: "#FFFFFF"
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 22
+            color: "#FFFFFF"
+            opacity: viewModeMouse.containsMouse ? 0.18 : 0
+            Behavior on opacity { NumberAnimation { duration: 100 } }
+        }
+
+        MouseArea {
+            id: viewModeMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                root.collapse()
+                root.viewModeToggleRequested()
+            }
+        }
+
+        StyledTip {
+            visible: viewModeMouse.containsMouse
+            text: root.isMarkdownView ? "切换到源码" : "切换到预览"
+        }
+    }
+
+    // Sub-FAB: Sidebar toggle
+    Rectangle {
+        id: sidebarFab
+        anchors.horizontalCenter: mainFab.horizontalCenter
+        width: 44
+        height: 44
+        radius: 22
+        color: root.md3Primary
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.24)
+        visible: root.expanded
+        scale: root.expanded ? 1 : 0
+        opacity: root.expanded ? 1 : 0
+        y: mainFab.y - 300
+
+        Behavior on scale { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -1
+            anchors.topMargin: 2
+            z: -1
+            radius: 22
+            color: Qt.rgba(0, 0, 0, 0.10)
+        }
+
+        IconImage {
+            anchors.centerIn: parent
+            width: 20
+            height: 20
+            source: root.iconBase + "MeteorIconsSidebar.png"
+            color: "#FFFFFF"
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 22
+            color: "#FFFFFF"
+            opacity: sidebarFabMouse.containsMouse ? 0.18 : 0
+            Behavior on opacity { NumberAnimation { duration: 100 } }
+        }
+
+        MouseArea {
+            id: sidebarFabMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                root.collapse()
+                root.sidebarToggleRequested()
+            }
+        }
+
+        StyledTip {
+            visible: sidebarFabMouse.containsMouse
+            text: root.sidebarVisible ? "收起侧边栏" : "展开侧边栏"
         }
     }
 
@@ -270,7 +394,7 @@ Item {
             anchors.centerIn: parent
             width: 22
             height: 22
-            source: root.expanded ? (root.iconBase + "close-white.svg") : (root.iconBase + "IconParkOutlineToolkit.svg")
+            source: root.expanded ? (root.iconBase + "close-white.png") : (root.iconBase + "IconParkOutlineToolkit.png")
             color: "#FFFFFF"
             opacity: 1
             Behavior on source {

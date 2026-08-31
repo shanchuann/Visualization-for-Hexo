@@ -133,8 +133,8 @@ public:
                 UINT dpi = GetDpiForWindow(msg->hwnd);
                 int frameX = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
                 int frameY = GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
-                // Expand draggable sensing height so dragging feels smoother.
-                int titleHeight = 64 * dpi / 96;
+                // Matches the QML title bar height exactly.
+                int titleHeight = 44 * dpi / 96;
 
                 // When maximized, don't allow edge-resize
                 bool maximized = IsZoomed(hwnd);
@@ -170,24 +170,19 @@ public:
                     return true;
                 }
 
-                // 中间区域可拖拽，但要避开左侧三色按钮、右侧操作按钮，以及顶部中央源码/预览切换。
-                int leftExclude = 220 * dpi / 96;
+                // 中间区域可拖拽，只避开左侧三色按钮和右侧操作按钮。
+                int leftExclude = 100 * dpi / 96;
                 int rightExclude = 320 * dpi / 96;
-                int centerExcludeHalf = 100 * dpi / 96;
-                int centerX = (winrect.left + winrect.right) / 2;
-                bool inCenterControl = (x >= centerX - centerExcludeHalf && x <= centerX + centerExcludeHalf);
                 if (y >= winrect.top + (maximized ? 0 : frameY) && y < winrect.top + titleHeight) {
                     // Explicitly keep left/right control zones as client area so
                     // QML MouseArea (traffic lights and right-side toolbar icons)
                     // always receives click events.
-                    if (inCenterControl
-                        || x < winrect.left + leftExclude
+                    if (x < winrect.left + leftExclude
                         || x >= winrect.right - rightExclude) {
                         *result = HTCLIENT;
                         return true;
                     }
-                    if (!inCenterControl
-                        && x >= winrect.left + leftExclude
+                    if (x >= winrect.left + leftExclude
                         && x < winrect.right - rightExclude) {
                         *result = HTCAPTION;
                         return true;
@@ -343,7 +338,7 @@ int main(int argc, char *argv[])
 
     qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
     qputenv("QSG_RENDER_LOOP", "threaded");
-    qputenv("QSG_RHI_BACKEND", "direct3d11");
+    qputenv("QSG_RHI_BACKEND", "d3d11");
     if (qEnvironmentVariableIsEmpty("QTWEBENGINE_CHROMIUM_FLAGS")) {
         // Improve stability on some Windows GPU drivers for embedded WebEngine previews.
         qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu");
@@ -406,7 +401,7 @@ int main(int argc, char *argv[])
         const QString message = QStringLiteral("Failed to load UI.\n\n") + details +
                                 QStringLiteral("\n\nA startup.log file has been written next to the executable.");
         MessageBoxW(nullptr, reinterpret_cast<LPCWSTR>(message.utf16()),
-                    L"Visualization for Hexo", MB_OK | MB_ICONERROR);
+                    L"BlueSheep", MB_OK | MB_ICONERROR);
 #endif
         return -1;
     }

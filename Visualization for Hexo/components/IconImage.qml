@@ -4,7 +4,8 @@ import QtQuick.Effects
 Item {
     id: root
     property url source
-    property color color: "#44474E"
+    property color color: "#FFFFFF"
+    readonly property bool isRaster: String(root.source).toLowerCase().endsWith(".png")
 
     implicitWidth: 24
     implicitHeight: 24
@@ -15,7 +16,7 @@ Item {
         source: root.source
         sourceSize: Qt.size(root.width, root.height)
         fillMode: Image.PreserveAspectFit
-        visible: false
+        visible: root.isRaster
     }
 
     MultiEffect {
@@ -23,5 +24,6 @@ Item {
         source: img
         colorization: 1.0
         colorizationColor: root.color
+        visible: !root.isRaster
     }
 }

@@ -128,8 +128,8 @@ ApplicationWindow {
     readonly property color md3InverseSurface: "#2F3036"
     readonly property color md3InverseOnSurface: "#F0F0F7"
     readonly property color md3InversePrimary: "#ADC6FF"
-    readonly property color layoutBg: "#FFFFFF"
-    readonly property color sidePanelBg: "#F8F9FC"
+    readonly property color layoutBg: "#F5F5F5"
+    readonly property color sidePanelBg: "#FFFFFF"
     readonly property color sidePanelItem: "#EEF2FA"
     readonly property color readingPaper: "#FFFFFF"
     readonly property color readingInk: "#2B261B"
@@ -244,7 +244,31 @@ ApplicationWindow {
 
     function enterAiEditMode() {
         if (!appContext.openedPostPath) return
-        aiUi.editMode = true
+        ballMenuPopup.close()
+        aiChatDialog.open()
+        Qt.callLater(function() { root.positionAiChatDialog() })
+    }
+
+    // Anchor the AI surface to the ball while keeping it inside the window.
+    function positionAiChatDialog() {
+        if (!emotionBall || !aiChatDialog || !aiChatDialog.parent) return
+        var p = emotionBall.mapToItem(aiChatDialog.parent, 0, 0)
+        var gap = 18
+        var margin = 18
+        var leftX = p.x - aiChatDialog.width - gap
+        var rightX = p.x + emotionBall.width + gap
+        var canLeft = leftX >= margin
+        var canRight = rightX + aiChatDialog.width <= aiChatDialog.parent.width - margin
+        var preferLeft = p.x + emotionBall.width / 2 > aiChatDialog.parent.width / 2
+        var useLeft = preferLeft ? (canLeft || !canRight) : (!canRight && canLeft)
+        var targetX = useLeft ? leftX : rightX
+        if (!canLeft && !canRight) {
+            targetX = Math.max(margin, Math.min(aiChatDialog.parent.width - aiChatDialog.width - margin, targetX))
+        }
+        var targetY = p.y + (emotionBall.height - aiChatDialog.height) / 2
+        var maxY = Math.max(margin, aiChatDialog.parent.height - aiChatDialog.height - margin)
+        aiChatDialog.x = Math.max(margin, Math.min(targetX, aiChatDialog.parent.width - aiChatDialog.width - margin))
+        aiChatDialog.y = Math.max(margin, Math.min(maxY, targetY))
     }
 
     function exitAiEditMode() {
@@ -257,13 +281,13 @@ ApplicationWindow {
                 function() {
                     aiSession.pendingDiff = null
                     aiSession.hunkDecisions = ({})
-                    aiUi.editMode = false
+                    aiChatDialog.close()
                     if (appContext.aiChat) appContext.aiChat.cancel()
                 }
             )
             return
         }
-        aiUi.editMode = false
+        aiChatDialog.close()
         aiUi.referencedPosts = []
         if (appContext.aiChat) appContext.aiChat.cancel()
     }
@@ -661,25 +685,27 @@ ApplicationWindow {
         minimumSize: 0.08
         interactive: true
         hoverEnabled: true
-        width: orientation === Qt.Vertical ? 18 : undefined
-        height: orientation === Qt.Horizontal ? 18 : undefined
+        width: orientation === Qt.Vertical ? 8 : undefined
+        height: orientation === Qt.Horizontal ? 8 : undefined
+        opacity: wideSb.active || wideSb.hovered || wideSb.pressed ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 180 } }
 
         contentItem: Rectangle {
-            implicitWidth: wideSb.orientation === Qt.Vertical ? 14 : wideSb.availableWidth
-            implicitHeight: wideSb.orientation === Qt.Horizontal ? 14 : wideSb.availableHeight
-            radius: 7
+            implicitWidth: wideSb.orientation === Qt.Vertical ? 4 : wideSb.availableWidth
+            implicitHeight: wideSb.orientation === Qt.Horizontal ? 4 : wideSb.availableHeight
+            radius: 2
             color: wideSb.pressed
                 ? Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.8)
                 : (wideSb.hovered
                     ? Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.65)
-                    : Qt.rgba(root.md3Outline.r, root.md3Outline.g, root.md3Outline.b, 0.52))
+                    : Qt.rgba(root.md3Outline.r, root.md3Outline.g, root.md3Outline.b, 0.46))
         }
 
         background: Rectangle {
-            implicitWidth: wideSb.orientation === Qt.Vertical ? 14 : wideSb.availableWidth
-            implicitHeight: wideSb.orientation === Qt.Horizontal ? 14 : wideSb.availableHeight
-            radius: 7
-            color: Qt.rgba(root.md3OnSurfaceVariant.r, root.md3OnSurfaceVariant.g, root.md3OnSurfaceVariant.b, 0.12)
+            implicitWidth: wideSb.orientation === Qt.Vertical ? 4 : wideSb.availableWidth
+            implicitHeight: wideSb.orientation === Qt.Horizontal ? 4 : wideSb.availableHeight
+            radius: 2
+            color: "transparent"
         }
     }
 
@@ -830,8 +856,8 @@ ApplicationWindow {
                 width: 14
                 height: 14
                 source: cb.popup && cb.popup.visible
-                    ? "qrc:/qt/qml/visualization for hexo/assets/iconpark/up.svg"
-                    : "qrc:/qt/qml/visualization for hexo/assets/iconpark/down.svg"
+                    ? "qrc:/qt/qml/visualization for hexo/assets/iconpark/up.png"
+                    : "qrc:/qt/qml/visualization for hexo/assets/iconpark/down.png"
                 color: cb.pressed ? root.md3Primary : root.md3OnSurfaceVariant
             }
 
@@ -1046,7 +1072,7 @@ ApplicationWindow {
             IconImage {
                 width: 14
                 height: 14
-                source: ok ? root.iconBase + "HugeiconsCheckmarkCircle02.svg" : root.iconBase + "close.svg"
+                source: ok ? root.iconBase + "HugeiconsCheckmarkCircle02.png" : root.iconBase + "close.png"
                 color: ok ? root.md3Primary : root.md3Error
             }
 
@@ -1447,11 +1473,8 @@ ApplicationWindow {
         anchors.left: parent.left
         anchors.right: parent.right
         height: visible ? 52 : 0
-        color: root.md3SurfaceContainerLowest
+        color: root.layoutBg
         z: 10
-
-        // Bottom divider
-        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Qt.rgba(0, 0, 0, 0.06) }
 
         RowLayout {
             anchors.fill: parent
@@ -1517,6 +1540,7 @@ ApplicationWindow {
 
             RowLayout {
                 Layout.alignment: Qt.AlignVCenter
+                Layout.rightMargin: 18
                 spacing: 12
 
                 Rectangle {
@@ -1609,21 +1633,6 @@ ApplicationWindow {
                     }
                 }
 
-                // ---- Settings button ----
-                IconActionButton {
-                    width: root.topBarButtonSize
-                    height: root.topBarButtonSize
-                    iconSource: root.iconBase + "setting.svg"
-                    toolTipText: "设置"
-                    onClicked: {
-                        if (settingsDrawer.opened) {
-                            settingsDrawer.close()
-                        } else {
-                            settingsDrawer.open()
-                        }
-                    }
-                }
-                
             }
         }
 
@@ -1645,18 +1654,26 @@ ApplicationWindow {
         }
 
         // ==================== Left Sidebar (Posts List) ====================
-        Rectangle {
-            id: sidebar
+        Item {
             SplitView.preferredWidth: root.fixedSidebarWidth
             SplitView.minimumWidth: root.fixedSidebarWidth
             SplitView.maximumWidth: root.fixedSidebarWidth
-            color: root.sidePanelBg
-            visible: true
+
+            Rectangle {
+                id: sidebar
+                anchors.fill: parent
+                anchors.margins: 8
+                anchors.leftMargin: 12
+                anchors.topMargin: 10
+                anchors.bottomMargin: 12
+                radius: 16
+                color: root.sidePanelBg
+                visible: true
 
             StackLayout {
                 id: sidebarStack
                 anchors.fill: parent
-                currentIndex: aiUi.editMode ? 1 : 0
+                currentIndex: 0
 
                 ColumnLayout {
                     spacing: 0
@@ -1671,57 +1688,73 @@ ApplicationWindow {
                             anchors.fill: parent
                             anchors.leftMargin: 20
                             anchors.rightMargin: 12
+                            spacing: 2
 
                             Text {
                                 text: "文章"
                                 font.pixelSize: 16
                                 font.weight: Font.DemiBold
                                 color: root.md3OnSurface
-                                Layout.fillWidth: true
+                                Layout.preferredWidth: 42
                                 Layout.alignment: Qt.AlignVCenter
-                                visible: !root.sidebarSearchMode
                             }
 
-                            UiTextField {
-                                id: searchInput
-                                visible: root.sidebarSearchMode
+                            Item {
+                                id: searchFieldShell
                                 Layout.fillWidth: true
                                 Layout.alignment: Qt.AlignVCenter
-                                height: root.inputHeight
-                                placeholderText: "搜索文章标题、内容..."
-                                onTextChanged: {
-                                    root.sidebarSearchQuery = text
-                                    searchDebounceTimer.restart()
-                                }
-                            }
-
-                            IconActionButton {
-                                Layout.alignment: Qt.AlignVCenter
-                                width: 28
-                                height: 28
-                                iconSource: root.iconBase + "search.svg"
-                                toolTipText: root.sidebarSearchMode ? "关闭搜索" : "搜索文章"
-                                background: Rectangle {
-                                    radius: root.shapeSmall
-                                    color: root.sidebarSearchMode
-                                        ? root.md3PrimaryContainer
-                                        : (parent.pressed
-                                            ? Qt.rgba(root.md3OnSurfaceVariant.r, root.md3OnSurfaceVariant.g, root.md3OnSurfaceVariant.b, 0.18)
-                                            : (parent.hovered ? root.hoverOverlay(true) : "transparent"))
-                                    Behavior on color { ColorAnimation { duration: 100 } }
-                                }
-                                contentItem: Item {
-                                    IconImage {
-                                        anchors.centerIn: parent
-                                        width: 15
-                                        height: 15
-                                        source: root.iconBase + (root.sidebarSearchMode ? "close.svg" : "search.svg")
-                                        color: root.sidebarSearchMode ? root.md3Primary : root.md3OnSurfaceVariant
+                                height: 32
+                                UiTextField {
+                                    id: searchInput
+                                    anchors.fill: parent
+                                    rightPadding: 38
+                                    placeholderText: "搜索文章标题、内容..."
+                                    background: Rectangle {
+                                        radius: root.shapeSmall
+                                        color: root.md3SurfaceContainerLow
+                                        border.width: 1
+                                        border.color: searchInput.activeFocus ? root.md3FocusSoft : root.md3OutlineVariant
+                                        Behavior on border.color { ColorAnimation { duration: 150 } }
+                                    }
+                                    onTextChanged: {
+                                        root.sidebarSearchQuery = text
+                                        searchDebounceTimer.restart()
                                     }
                                 }
-                                onClicked: {
-                                    root.sidebarSearchMode = !root.sidebarSearchMode
-                                    if (!root.sidebarSearchMode) searchInput.text = ""
+                                IconActionButton {
+                                    id: searchAction
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 3
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 26
+                                    height: 26
+                                    iconSource: root.iconBase + "search.png"
+                                    toolTipText: root.sidebarSearchQuery.trim().length > 0 ? "清空搜索" : "聚焦搜索"
+                                    background: Rectangle {
+                                        radius: 13
+                                        color: root.sidebarSearchQuery.trim().length > 0
+                                            ? Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.12)
+                                            : (searchAction.pressed
+                                                ? Qt.rgba(root.md3OnSurfaceVariant.r, root.md3OnSurfaceVariant.g, root.md3OnSurfaceVariant.b, 0.12)
+                                                : (searchAction.hovered ? root.hoverOverlay(true) : "transparent"))
+                                        Behavior on color { ColorAnimation { duration: 100 } }
+                                    }
+                                    contentItem: Item {
+                                        IconImage {
+                                            anchors.centerIn: parent
+                                            width: 15
+                                            height: 15
+                                            source: root.iconBase + (root.sidebarSearchQuery.trim().length > 0 ? "close.png" : "search.png")
+                                            color: root.sidebarSearchQuery.trim().length > 0 ? root.md3Primary : root.md3OnSurfaceVariant
+                                        }
+                                    }
+                                    onClicked: {
+                                        if (root.sidebarSearchQuery.trim().length > 0) {
+                                            searchInput.text = ""
+                                        } else {
+                                            searchInput.forceActiveFocus()
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1730,7 +1763,7 @@ ApplicationWindow {
                 // Posts list
                 ListView {
                     id: postsList
-                    visible: !root.sidebarSearchMode
+                    visible: root.sidebarSearchQuery.trim().length === 0
                     property real quantizedWidth: Math.max(320, Math.round(width / 20) * 20)
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -1780,8 +1813,8 @@ ApplicationWindow {
 
                                 color: {
                                     if (postEntry.path && postEntry.path === appContext.openedPostPath) return root.sidePanelItem
-                                    if (postMouse.containsMouse) return Qt.rgba(root.md3OnSurface.r, root.md3OnSurface.g, root.md3OnSurface.b, 0.05)
-                                    return "transparent"
+                                    if (postMouse.containsMouse) return Qt.rgba(root.md3OnSurface.r, root.md3OnSurface.g, root.md3OnSurface.b, 0.08)
+                                    return root.md3SurfaceContainerLow
                                 }
                                 Behavior on color { ColorAnimation { duration: 100 } }
 
@@ -1851,13 +1884,13 @@ ApplicationWindow {
 
                 // Search results (visible when search mode is active)
                 Item {
-                    visible: root.sidebarSearchMode
+                    visible: root.sidebarSearchQuery.trim().length > 0
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
                     Text {
                         anchors.centerIn: parent
-                        visible: root.sidebarSearchQuery.trim().length === 0
+                        visible: false
                         text: "请输入关键词搜索"
                         font.pixelSize: 14
                         color: root.md3OnSurfaceVariant
@@ -1895,7 +1928,6 @@ ApplicationWindow {
                                 onClicked: {
                                     if (entry.path) {
                                         appContext.openPost(entry.path)
-                                        root.sidebarSearchMode = false
                                         searchInput.text = ""
                                     }
                                 }
@@ -1949,45 +1981,9 @@ ApplicationWindow {
 
                 }
 
-                // AI Chat Panel (index 1)
-                AiChatPanel {
-                    aiSession: aiSession
-                    aiUi: aiUi
-                    md3Primary: root.md3Primary
-                    md3OnPrimary: root.md3OnPrimary
-                    md3PrimaryContainer: root.md3PrimaryContainer
-                    md3OnPrimaryContainer: root.md3OnPrimaryContainer
-                    md3Surface: root.md3Surface
-                    md3OnSurface: root.md3OnSurface
-                    md3SurfaceContainer: root.md3SurfaceContainer
-                    md3SurfaceContainerHigh: root.md3SurfaceContainerHigh
-                    md3OnSurfaceVariant: root.md3OnSurfaceVariant
-                    md3OutlineVariant: root.md3OutlineVariant
-                    md3Error: root.md3Error
-                    md3ErrorContainer: root.md3ErrorContainer
-                    shapeMedium: root.shapeMedium
-                    onCloseRequested: root.exitAiEditMode()
-                    onApplyAllRequested: {
-                        if (!aiSession.pendingDiff) return
-                        var rebuilt = root.rebuildDiffBody(aiSession.pendingDiff.original, aiSession.pendingDiff.hunks, null)
-                        appContext.applyAiEditedBody(rebuilt)
-                        aiSession.pendingDiff = null
-                        aiSession.hunkDecisions = ({})
-                    }
-                    onRejectAllRequested: {
-                        aiSession.pendingDiff = null
-                        aiSession.hunkDecisions = ({})
-                    }
-                    onApplyChangesRequested: {
-                        if (!aiSession.pendingDiff) return
-                        var rebuilt = root.rebuildDiffBody(aiSession.pendingDiff.original, aiSession.pendingDiff.hunks, aiSession.hunkDecisions)
-                        appContext.applyAiEditedBody(rebuilt)
-                        aiSession.pendingDiff = null
-                        aiSession.hunkDecisions = ({})
-                    }
-                }
             }
         }
+        } // End of sidebar wrapper Item
 
         // ==================== Center Area (Editor + Console Overlay) ====================
         Item {
@@ -1998,7 +1994,16 @@ ApplicationWindow {
             // ---- Editor Area ----
             Rectangle {
                 anchors.fill: parent
-                color: root.layoutBg
+                anchors.margins: 8
+                anchors.topMargin: 10
+                anchors.bottomMargin: 12
+                anchors.rightMargin: 12
+                radius: 16
+                color: root.readingPaper
+                border.width: 1
+                border.color: Qt.rgba(root.md3OutlineVariant.r,
+                                      root.md3OutlineVariant.g,
+                                      root.md3OutlineVariant.b, 0.34)
 
                 Item {
                     id: editorViewport
@@ -2417,55 +2422,30 @@ ApplicationWindow {
         }
     }
 
-    IconActionButton {
-        id: sidebarToggle
-        anchors.left: parent.left
-        anchors.leftMargin: sidebar.visible ? (root.fixedSidebarWidth + 10) : 10
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 24
-        width: root.topBarButtonSize
-        height: root.topBarButtonSize
-        iconSource: root.iconBase + "MeteorIconsSidebar.svg"
-        toolTipText: sidebar.visible ? "收起侧边栏" : "展开侧边栏"
-        z: 18
-        onClicked: {
-            const nextVisible = !sidebar.visible
-            sidebar.visible = nextVisible
-            sidebar.SplitView.preferredWidth = nextVisible ? root.fixedSidebarWidth : 0
-        }
-    }
-
-    IconActionButton {
-        id: viewModeToggle
-        anchors.left: sidebarToggle.right
-        anchors.leftMargin: 6
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 24
-        width: root.topBarButtonSize
-        height: root.topBarButtonSize
-        iconSource: editorContent.isMarkdown ? (root.iconBase + "code.svg") : (root.iconBase + "preview-open.svg")
-        toolTipText: editorContent.isMarkdown ? "切换到源码" : "切换到预览"
-        z: 18
-        onClicked: root.articleViewMode = editorContent.isMarkdown ? 0 : 1
-    }
-
     // ======================== Settings Drawer (MD3 Side Sheet) ========================
     Drawer {
         id: settingsDrawer
         edge: Qt.RightEdge
         y: titleBar.height
-        width: 460
+        width: 500
         height: root.height - titleBar.height
+        background: Item {}
 
         Rectangle {
             anchors.fill: parent
-            color: root.md3Surface
+            anchors.leftMargin: 12
+            anchors.topMargin: 12
+            anchors.bottomMargin: 12
+            radius: 20
+            color: root.md3SurfaceContainerLowest
+            border.width: 1
+            border.color: Qt.rgba(0, 0, 0, 0.08)
 
             Flickable {
                 id: settingsViewport
                 anchors.fill: parent
                 contentWidth: width
-                contentHeight: settingsContent.implicitHeight + 60
+                contentHeight: settingsContent.implicitHeight + 44
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 flickDeceleration: 10000
@@ -2478,19 +2458,28 @@ ApplicationWindow {
                     x: 24
                     y: 24
                     height: implicitHeight
-                    spacing: 24
+                    spacing: 16
 
                     // ---- Header ----
                     RowLayout {
                         Layout.fillWidth: true
                         Text {
                             text: "配置中心"
-                            font.pixelSize: 24
-                            font.weight: Font.Medium
+                            font.pixelSize: 22
+                            font.weight: Font.DemiBold
                             color: root.md3OnSurface
                             Layout.fillWidth: true
                         }
-                        IconActionButton { iconSource: root.iconBase + "close.svg"; toolTipText: "关闭"; onClicked: settingsDrawer.close() }
+                        IconActionButton { iconSource: root.iconBase + "close.png"; toolTipText: "关闭"; onClicked: settingsDrawer.close() }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: (appContext.currentProjectPath && appContext.currentProjectPath.length > 0
+                               ? appContext.currentProjectPath : "未选择项目")
+                        color: root.md3OnSurfaceVariant
+                        font.pixelSize: 12
+                        elide: Text.ElideMiddle
                     }
 
                     Rectangle {
@@ -2701,44 +2690,41 @@ ApplicationWindow {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 82
-                        radius: root.shapeLarge
-                        color: root.md3SurfaceContainerLow
+                        height: 58
+                        radius: root.shapeMedium
+                        color: root.md3SurfaceContainer
 
                         RowLayout {
                             anchors.fill: parent
-                            anchors.margins: 6
-                            spacing: 6
+                            anchors.margins: 5
+                            spacing: 4
 
                             Repeater {
                                 model: [
-                                    { label: "文章设置", icon: "edit.svg" },
-                                    { label: "站点设置", icon: "setting.svg" },
-                                    { label: "系统设置", icon: "code.svg" },
-                                    { label: "信息统计", icon: "preview-open.svg" },
-                                    { label: "回收站", icon: "delete.svg" }
+                                    { label: "编辑器", icon: "edit.png" },
+                                    { label: "站点", icon: "setting.png" },
+                                    { label: "项目与 AI", icon: "ai-magic.png" },
+                                    { label: "统计", icon: "preview-open.png" },
+                                    { label: "回收站", icon: "delete.png" }
                                 ]
                                 delegate: Rectangle {
                                     Layout.fillWidth: true
                                     Layout.preferredWidth: 1
                                     Layout.minimumWidth: 0
                                     Layout.fillHeight: true
-                                    radius: root.shapeMedium
+                                    radius: 10
                                     color: root.settingsTabIndex === index
                                         ? root.md3PrimaryContainer
-                                        : root.md3SurfaceContainerLowest
-                                    border.width: 1
-                                    border.color: root.settingsTabIndex === index
-                                        ? root.md3Primary
-                                        : root.md3OutlineVariant
+                                        : "transparent"
+                                    border.width: 0
 
                                     Column {
                                         anchors.centerIn: parent
-                                        spacing: 4
+                                        spacing: 3
 
                                         Rectangle {
-                                            width: 24
-                                            height: 24
+                                            width: 22
+                                            height: 22
                                             radius: 12
                                             color: root.settingsTabIndex === index
                                                 ? root.md3Primary
@@ -2747,8 +2733,8 @@ ApplicationWindow {
 
                                             IconImage {
                                                 anchors.centerIn: parent
-                                                width: 14
-                                                height: 14
+                                                width: 13
+                                                height: 13
                                                 source: root.iconBase + modelData.icon
                                                 color: root.settingsTabIndex === index
                                                     ? root.md3OnPrimary
@@ -2759,7 +2745,7 @@ ApplicationWindow {
                                         Text {
                                             Layout.fillWidth: true
                                             text: modelData.label
-                                            font.pixelSize: 12
+                                            font.pixelSize: 11
                                             font.weight: Font.Medium
                                             color: root.settingsTabIndex === index
                                                 ? root.md3Primary
@@ -3316,7 +3302,7 @@ ApplicationWindow {
                                 Item { Layout.fillWidth: true }
                                 IconActionButton {
                                     width: 24; height: 24
-                                    iconSource: root.iconBase + "play.svg"
+                                    iconSource: root.iconBase + "play.png"
                                     toolTipText: "刷新记录"
                                     onClicked: root.backupHistory = appContext.gitLogSync(20)
                                 }
@@ -4066,10 +4052,17 @@ ApplicationWindow {
         y: titleBar.height
         width: 400
         height: root.height - titleBar.height
+        background: Item {}
 
         Rectangle {
             anchors.fill: parent
+            anchors.leftMargin: 12
+            anchors.topMargin: 12
+            anchors.bottomMargin: 12
+            radius: 16
             color: root.md3Surface
+            border.width: 1
+            border.color: Qt.rgba(0, 0, 0, 0.08)
 
             Flickable {
                 anchors.fill: parent
@@ -4095,7 +4088,7 @@ ApplicationWindow {
                         IconImage {
                             width: 20
                             height: 20
-                            source: root.iconBase + "plug.svg"
+                            source: root.iconBase + "plug.png"
                             color: root.md3Primary
                         }
 
@@ -4115,7 +4108,7 @@ ApplicationWindow {
                         }
 
                         IconActionButton {
-                            iconSource: root.iconBase + "close.svg"
+                            iconSource: root.iconBase + "close.png"
                             toolTipText: "关闭"
                             onClicked: pluginDrawer.close()
                         }
@@ -4271,23 +4264,6 @@ ApplicationWindow {
                     }
                 }
             }
-        }
-    }
-
-    SpeedDialFab {
-        id: speedDialFab
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.rightMargin: 18
-        anchors.bottomMargin: 18
-        hasOpenedPost: appContext.openedPostPath.length > 0
-        settingsDrawerOpen: settingsDrawer.opened
-        pluginDrawerOpen: pluginDrawer.opened
-        onAddArticleRequested: appContext.newPost("新文章", "未分类", "新标签")
-        onAiEditRequested: root.enterAiEditMode()
-        onPluginManagementRequested: {
-            appContext.loadPlugins()
-            pluginDrawer.open()
         }
     }
 
@@ -4881,6 +4857,69 @@ ApplicationWindow {
         }
     }
 
+    // ======================== Emotion Ball ========================
+    EmotionBall {
+        id: emotionBall
+        z: 50
+        isMarkdownView: editorContent.isMarkdown
+        x: parent.width - width - 24
+        y: parent.height - height - 24
+
+        onBallClicked: {
+            if (ballMenuPopup.opened) {
+                ballMenuPopup.close()
+            } else {
+                ballMenuPopup.reposition()
+                ballMenuPopup.open()
+            }
+        }
+    }
+
+    // Track mouse for ball eye movement
+    MouseArea {
+        id: globalMouseTracker
+        anchors.fill: parent
+        z: 1
+        hoverEnabled: true
+        propagateComposedEvents: true
+        acceptedButtons: Qt.NoButton
+
+        onPositionChanged: function(mouse) {
+            if (containsMouse && !ballMenuPopup.opened) {
+                var globalPos = mapToItem(null, mouse.x, mouse.y)
+                emotionBall.updateEyeTarget(globalPos.x, globalPos.y)
+            }
+        }
+
+        onExited: {
+            if (!ballMenuPopup.opened) {
+                emotionBall.setEmotion("02")
+            }
+        }
+    }
+
+    // ======================== Ball Menu Popup ========================
+    BallMenuPopup {
+        id: ballMenuPopup
+        parent: Overlay.overlay
+
+        emotionBall: emotionBall
+        sidebar: sidebar
+        settingsDrawer: settingsDrawer
+        pluginDrawer: pluginDrawer
+        editorContent: editorContent
+        appContext: appContext
+        fixedSidebarWidth: root.fixedSidebarWidth
+
+        onAiEditRequested: {
+            root.enterAiEditMode()
+        }
+
+        onViewModeToggleRequested: function(isMarkdown) {
+            editorContent.isMarkdown = isMarkdown
+        }
+    }
+
     FileDialog {
         id: coverFileDialog
         title: "选择封面图片"
@@ -4894,6 +4933,224 @@ ApplicationWindow {
             if (imported && imported.length > 0) {
                 coverInput.text = imported
             }
+        }
+    }
+
+    // ======================== AI Chat Dialog ========================
+    Dialog {
+        id: aiChatDialog
+        parent: Overlay.overlay
+        modal: false
+        width: Math.min(root.fixedSidebarWidth, root.width - 36)
+        height: Math.min(600, root.height - 80)
+        property int minimumResizeWidth: 320
+        property int minimumResizeHeight: 360
+        property int resizeMargin: 18
+        property string resizeEdge: "none"
+        property real resizeStartPointerX: 0
+        property real resizeStartPointerY: 0
+        property real resizeStartX: 0
+        property real resizeStartY: 0
+        property real resizeStartWidth: 0
+        property real resizeStartHeight: 0
+
+        function beginResize(edge, pointerX, pointerY) {
+            resizeEdge = edge
+            resizeStartPointerX = pointerX
+            resizeStartPointerY = pointerY
+            resizeStartX = x
+            resizeStartY = y
+            resizeStartWidth = width
+            resizeStartHeight = height
+        }
+
+        function resizeFromPointer(pointerX, pointerY) {
+            if (resizeEdge === "none" || !parent) return
+            var dx = pointerX - resizeStartPointerX
+            var dy = pointerY - resizeStartPointerY
+            var left = resizeEdge.indexOf("left") >= 0
+            var top = resizeEdge.indexOf("top") >= 0
+            var maxW = Math.max(minimumResizeWidth, parent.width - resizeMargin * 2)
+            var maxH = Math.max(minimumResizeHeight, parent.height - resizeMargin * 2)
+            var nextW = Math.max(minimumResizeWidth,
+                                 Math.min(maxW, resizeStartWidth + (left ? -dx : dx)))
+            var nextH = Math.max(minimumResizeHeight,
+                                 Math.min(maxH, resizeStartHeight + (top ? -dy : dy)))
+            var nextX = left ? resizeStartX + resizeStartWidth - nextW : resizeStartX
+            var nextY = top ? resizeStartY + resizeStartHeight - nextH : resizeStartY
+
+            if (nextX < resizeMargin) {
+                nextW -= resizeMargin - nextX
+                nextX = resizeMargin
+            }
+            if (nextY < resizeMargin) {
+                nextH -= resizeMargin - nextY
+                nextY = resizeMargin
+            }
+            if (nextX + nextW > parent.width - resizeMargin) {
+                nextW = parent.width - resizeMargin - nextX
+            }
+            if (nextY + nextH > parent.height - resizeMargin) {
+                nextH = parent.height - resizeMargin - nextY
+            }
+
+            width = Math.max(minimumResizeWidth, nextW)
+            height = Math.max(minimumResizeHeight, nextH)
+            x = nextX
+            y = nextY
+        }
+
+        function endResize() {
+            resizeEdge = "none"
+        }
+
+        padding: 0
+        closePolicy: Popup.NoAutoClose
+
+        background: Rectangle {
+            radius: root.shapeLarge
+            color: root.md3Surface
+            border.width: 1
+            border.color: aiChatDialog.resizeEdge !== "none"
+                ? Qt.rgba(0.48, 0.68, 1.0, 0.30)
+                : root.md3OutlineVariant
+            layer.enabled: aiChatDialog.resizeEdge !== "none"
+            layer.smooth: true
+        }
+
+        onOpened: root.positionAiChatDialog()
+
+        Connections {
+            target: emotionBall
+            function onXChanged() { if (aiChatDialog.opened) root.positionAiChatDialog() }
+            function onYChanged() { if (aiChatDialog.opened) root.positionAiChatDialog() }
+        }
+
+        Connections {
+            target: root
+            function onWidthChanged() { if (aiChatDialog.opened) root.positionAiChatDialog() }
+            function onHeightChanged() { if (aiChatDialog.opened) root.positionAiChatDialog() }
+        }
+
+        contentItem: AiChatPanel {
+            aiSession: aiSession
+            aiUi: aiUi
+            md3Primary: root.md3Primary
+            md3OnPrimary: root.md3OnPrimary
+            md3PrimaryContainer: root.md3PrimaryContainer
+            md3OnPrimaryContainer: root.md3OnPrimaryContainer
+            md3Surface: root.md3Surface
+            md3OnSurface: root.md3OnSurface
+            md3SurfaceContainer: root.md3SurfaceContainer
+            md3SurfaceContainerHigh: root.md3SurfaceContainerHigh
+            md3OnSurfaceVariant: root.md3OnSurfaceVariant
+            md3OutlineVariant: root.md3OutlineVariant
+            md3Error: root.md3Error
+            md3ErrorContainer: root.md3ErrorContainer
+            shapeMedium: root.shapeMedium
+            onCloseRequested: root.exitAiEditMode()
+            onApplyAllRequested: {
+                if (!aiSession.pendingDiff) return
+                var rebuilt = root.rebuildDiffBody(aiSession.pendingDiff.original, aiSession.pendingDiff.hunks, null)
+                appContext.applyAiEditedBody(rebuilt)
+                aiSession.pendingDiff = null
+                aiSession.hunkDecisions = ({})
+            }
+            onRejectAllRequested: {
+                aiSession.pendingDiff = null
+                aiSession.hunkDecisions = ({})
+            }
+            onApplyChangesRequested: {
+                if (!aiSession.pendingDiff) return
+                var rebuilt = root.rebuildDiffBody(aiSession.pendingDiff.original, aiSession.pendingDiff.hunks, aiSession.hunkDecisions)
+                appContext.applyAiEditedBody(rebuilt)
+                aiSession.pendingDiff = null
+                aiSession.hunkDecisions = ({})
+            }
+        }
+
+        // Thin resize zones keep the content clean while making the active
+        // edge visible with a soft rounded blue glow.
+        Item {
+            id: resizeHandles
+            anchors.fill: parent
+            z: 20
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 2
+                radius: root.shapeLarge - 2
+                color: "transparent"
+                border.width: 2
+                border.color: Qt.rgba(0.40, 0.66, 1.0, 0.24)
+                opacity: 0.75
+                visible: aiChatDialog.resizeEdge !== "none"
+            }
+
+            component ResizeHandle: MouseArea {
+                property string edge: ""
+                hoverEnabled: true
+                cursorShape: edge === "left" || edge === "right"
+                    ? Qt.SizeHorCursor
+                    : edge === "top" || edge === "bottom"
+                        ? Qt.SizeVerCursor
+                        : (edge === "top-left" || edge === "bottom-right"
+                            ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor)
+
+                onPressed: {
+                    var p = mapToItem(aiChatDialog.parent, mouse.x, mouse.y)
+                    aiChatDialog.beginResize(edge, p.x, p.y)
+                    mouse.accepted = true
+                }
+                onPositionChanged: {
+                    if (!pressed) return
+                    var p = mapToItem(aiChatDialog.parent, mouse.x, mouse.y)
+                    aiChatDialog.resizeFromPointer(p.x, p.y)
+                }
+                onReleased: aiChatDialog.endResize()
+                onCanceled: aiChatDialog.endResize()
+            }
+
+            ResizeHandle {
+                edge: "top"
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: 14
+                anchors.rightMargin: 14
+                height: 10
+            }
+            ResizeHandle {
+                edge: "bottom"
+                anchors.bottom: parent.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: 14
+                anchors.rightMargin: 14
+                height: 10
+            }
+            ResizeHandle {
+                edge: "left"
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.topMargin: 14
+                anchors.bottomMargin: 14
+                width: 10
+            }
+            ResizeHandle {
+                edge: "right"
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.topMargin: 14
+                anchors.bottomMargin: 14
+                width: 10
+            }
+            ResizeHandle { edge: "top-left"; anchors.left: parent.left; anchors.top: parent.top; width: 14; height: 14 }
+            ResizeHandle { edge: "top-right"; anchors.right: parent.right; anchors.top: parent.top; width: 14; height: 14 }
+            ResizeHandle { edge: "bottom-left"; anchors.left: parent.left; anchors.bottom: parent.bottom; width: 14; height: 14 }
+            ResizeHandle { edge: "bottom-right"; anchors.right: parent.right; anchors.bottom: parent.bottom; width: 14; height: 14 }
         }
     }
 }
