@@ -1,9 +1,12 @@
 <p align="center">
-	<img src="https://files.seeusercontent.com/2026/04/30/Qz7x/Visualization-for-Hexo-1.png" alt="BlueSheep" />
+	<img src="https://files.seeusercontent.com/2026/08/31/rJa8/pasted-image-1788163120937.webp" alt="BlueSheep" />
 
 </p>
 
-<h1 align="center">BlueSheep · 蓝羊羊</h1>
+<h1 style="text-align:center;">
+  <img src="https://files.seeusercontent.com/2026/08/31/8iaC/app-icon.png" alt="BlueSheep" style="height:2em;vertical-align:middle;" />
+  BlueSheep · 蓝羊羊
+</h1>
 
 <p align="center">
 	<img src="https://img.shields.io/badge/project-BlueSheep-4c566a" alt="project" />
