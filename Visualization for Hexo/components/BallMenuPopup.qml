@@ -23,6 +23,7 @@ Popup {
 
     // Signals for actions
     signal aiEditRequested()
+    signal newArticleRequested()
     signal viewModeToggleRequested(bool isMarkdown)
 
     property bool isActuallyOpened: false
@@ -61,6 +62,7 @@ Popup {
     // The list is data-driven so the menu remains coupled to the ball's
     // available actions while labels react to current editor state.
     readonly property var menuItems: [
+        { kind: "newArticle", label: "新建文章", icon: "plus.png" },
         { kind: "sidebar", label: "", icon: "menu.png" },
         { kind: "settings", label: "设置", icon: "setting.png" },
         { kind: "plugins", label: "插件管理", icon: "plug.png" },
@@ -89,14 +91,19 @@ Popup {
                     ? (sidebar.visible ? "隐藏侧边栏" : "显示侧边栏")
                     : kind === "view"
                         ? (editorContent.isMarkdown ? "代码模式" : "预览模式")
-                        : modelData.label
+                    : modelData.label
                 iconSource: root.iconBase + (kind === "view"
                     ? (editorContent.isMarkdown ? "code.png" : "preview-open.png")
                     : modelData.icon)
                 onClicked: {
-                    if (kind === "sidebar") {
+                    if (kind === "newArticle") {
+                        root.newArticleRequested()
+                    } else if (kind === "sidebar") {
                         sidebar.visible = !sidebar.visible
-                        sidebar.SplitView.preferredWidth = sidebar.visible ? fixedSidebarWidth : 0
+                        var pane = sidebar.parent
+                        pane.SplitView.preferredWidth = sidebar.visible ? fixedSidebarWidth : 0
+                        pane.SplitView.minimumWidth = sidebar.visible ? fixedSidebarWidth : 0
+                        pane.SplitView.maximumWidth = sidebar.visible ? fixedSidebarWidth : 0
                     } else if (kind === "settings") {
                         settingsDrawer.open()
                     } else if (kind === "plugins") {
@@ -115,12 +122,12 @@ Popup {
     onOpened: {
         isActuallyOpened = true
         reposition()
-        if (emotionBall) emotionBall.celebrate()
+        if (emotionBall && !emotionBall.aiActive) emotionBall.celebrate()
     }
 
     onClosed: {
         isActuallyOpened = false
-        if (emotionBall) emotionBall.setEmotion("02")
+        if (emotionBall && !emotionBall.aiActive && !emotionBall.idleTouring) emotionBall.setEmotion("02")
     }
 
     Connections {

@@ -1,5 +1,6 @@
 #include "CommandAdapter.h"
 
+#include <QStandardPaths>
 #include <QSysInfo>
 
 CommandAdapter::CommandAdapter(QObject *parent)
@@ -31,9 +32,23 @@ void CommandAdapter::startShellCommand(const QString &workingDirectory, const QS
     m_process.setWorkingDirectory(workingDirectory);
 
 #ifdef Q_OS_WIN
-    QString program = "cmd.exe";
+    // Prefer PowerShell 7 for the in-app console, with a native fallback
+    // for machines that only have Windows PowerShell or cmd available.
+    QString program = QStandardPaths::findExecutable("pwsh");
     QStringList args;
-    args << "/C" << commandLine;
+    if (!program.isEmpty()) {
+        args << "-NoLogo" << "-NoProfile" << "-ExecutionPolicy" << "Bypass"
+             << "-Command" << commandLine;
+    } else {
+        program = QStandardPaths::findExecutable("powershell");
+        if (!program.isEmpty()) {
+            args << "-NoLogo" << "-NoProfile" << "-ExecutionPolicy" << "Bypass"
+                 << "-Command" << commandLine;
+        } else {
+            program = "cmd.exe";
+            args << "/C" << commandLine;
+        }
+    }
 #else
     QString program = "/bin/sh";
     QStringList args;

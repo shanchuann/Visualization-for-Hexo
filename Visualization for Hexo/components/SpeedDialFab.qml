@@ -337,7 +337,7 @@ Item {
             anchors.centerIn: parent
             width: 20
             height: 20
-            source: root.iconBase + "MeteorIconsSidebar.png"
+                source: root.iconBase + "menu.png"
             color: "#FFFFFF"
         }
 

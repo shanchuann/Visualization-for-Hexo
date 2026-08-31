@@ -80,20 +80,17 @@ public:
             // native title bar and borders while keeping the window styles
             // that enable Aero Snap, taskbar interactions, etc.
             if (msg->message == WM_NCCALCSIZE) {
-                if (msg->wParam == TRUE) {
-                    // When maximized, adjust for the auto-hide taskbar and
-                    // prevent the window from covering the taskbar.
-                    WINDOWPLACEMENT wp = {};
-                    wp.length = sizeof(WINDOWPLACEMENT);
-                    GetWindowPlacement(hwnd, &wp);
-                    if (wp.showCmd == SW_MAXIMIZE) {
-                        NCCALCSIZE_PARAMS *params = reinterpret_cast<NCCALCSIZE_PARAMS *>(msg->lParam);
-                        HMONITOR hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-                        MONITORINFO mi;
-                        mi.cbSize = sizeof(MONITORINFO);
-                        if (GetMonitorInfo(hMon, &mi)) {
-                            params->rgrc[0] = mi.rcWork;
-                        }
+                // During programmatic maximize, WINDOWPLACEMENT can still
+                // report the old state on the first pass. IsZoomed reflects
+                // the native state immediately, so align the client rect to
+                // the monitor work area just like Windows Snap does.
+                if (msg->wParam == TRUE && IsZoomed(hwnd)) {
+                    NCCALCSIZE_PARAMS *params = reinterpret_cast<NCCALCSIZE_PARAMS *>(msg->lParam);
+                    HMONITOR hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                    MONITORINFO mi;
+                    mi.cbSize = sizeof(MONITORINFO);
+                    if (GetMonitorInfo(hMon, &mi)) {
+                        params->rgrc[0] = mi.rcWork;
                     }
                 }
                 *result = 0;
@@ -203,8 +200,15 @@ public:
             if (msg->message == WM_SIZE) {
                 if (msg->wParam == SIZE_MAXIMIZED) {
                     updateRoundedCorners(false);
+                    MARGINS m = {0, 0, 0, 0};
+                    DwmExtendFrameIntoClientArea(hwnd, &m);
+                    SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                                 SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOMOVE
+                                 | SWP_NOSIZE | SWP_FRAMECHANGED);
                 } else if (msg->wParam == SIZE_RESTORED) {
                     updateRoundedCorners(true);
+                    MARGINS m = {0, 0, 0, 1};
+                    DwmExtendFrameIntoClientArea(hwnd, &m);
                 }
             }
         }
@@ -415,6 +419,7 @@ int main(int argc, char *argv[])
         }
 
         HWND hwnd = reinterpret_cast<HWND>(window->winId());
+        appContext.setWindowHandle(reinterpret_cast<quintptr>(hwnd));
 
         // --- Enable native window styles for proper Windows integration ---
         // Adding WS_THICKFRAME enables Aero Snap (drag-to-edge maximize/tile).

@@ -11,6 +11,7 @@
         <file>components/BallMenuPopup.qml</file>
         <file>assets/iconpark/ai-magic.png</file>
         <file>assets/iconpark/check.png</file>
+        <file>assets/iconpark/ctrl.png</file>
         <file>assets/iconpark/close.png</file>
         <file>assets/iconpark/close-white.png</file>
         <file>assets/iconpark/code.png</file>
@@ -20,7 +21,6 @@
         <file>assets/iconpark/HugeiconsCheckmarkCircle02.png</file>
         <file>assets/iconpark/IconParkOutlineToolkit.png</file>
         <file>assets/iconpark/menu.png</file>
-        <file>assets/iconpark/MeteorIconsSidebar.png</file>
         <file>assets/iconpark/play.png</file>
         <file>assets/iconpark/plug.png</file>
         <file>assets/iconpark/plus.png</file>
@@ -28,6 +28,7 @@
         <file>assets/iconpark/search.png</file>
         <file>assets/iconpark/setting.png</file>
         <file>assets/iconpark/up.png</file>
+        <file>assets/iconpark/user.png</file>
         <file>qml/MainWindow.qml</file>
         <file>qml/PostList.qml</file>
         <file>qml/EditorHost.qml</file>

@@ -33,6 +33,10 @@
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrent>
 
+#ifdef Q_OS_WIN
+#include <Windows.h>
+#endif
+
 namespace {
 QString sanitizeConsoleChunk(const QString &raw)
 {
@@ -743,6 +747,31 @@ void AppContext::stopCurrentTask()
     appendLog("[task] stopped by user");
 }
 
+void AppContext::setWindowHandle(quintptr handle)
+{
+    m_windowHandle = handle;
+}
+
+void AppContext::maximizeWindow()
+{
+#ifdef Q_OS_WIN
+    if (m_windowHandle != 0) {
+        HWND hwnd = reinterpret_cast<HWND>(m_windowHandle);
+        ShowWindow(hwnd, SW_MAXIMIZE);
+        SetForegroundWindow(hwnd);
+    }
+#endif
+}
+
+void AppContext::restoreWindow()
+{
+#ifdef Q_OS_WIN
+    if (m_windowHandle != 0) {
+        ShowWindow(reinterpret_cast<HWND>(m_windowHandle), SW_RESTORE);
+    }
+#endif
+}
+
 void AppContext::submitConsoleInput(const QString &text)
 {
     const QString input = text.trimmed();
@@ -759,7 +788,7 @@ void AppContext::submitConsoleInput(const QString &text)
     }
 
     if (m_taskRunning || m_command->isRunning()) {
-        appendLog(QString("> %1").arg(input));
+        appendLog(QString("PS> %1").arg(input));
         m_command->writeLine(input);
         return;
     }

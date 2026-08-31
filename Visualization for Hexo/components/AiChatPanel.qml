@@ -9,11 +9,13 @@ Rectangle {
     // External bindings
     property var aiSession: null
     property var aiUi: null
+    property var emotionBall: null
     readonly property var ctx: typeof appContext !== "undefined" ? appContext : null
     readonly property string iconBase: "qrc:/qt/qml/visualization for hexo/assets/iconpark/"
     readonly property string appIcon: "qrc:/qt/qml/visualization for hexo/assets/app-icon.png"
     readonly property string siteTitle: ctx && ctx.configMap ? (ctx.configMap["title"] || "") : ""
     readonly property string userAvatarChar: siteTitle.length > 0 ? siteTitle.charAt(0) : "我"
+    readonly property string userAvatarSource: iconBase + "user.png"
     property color md3Primary: "#1B6EF3"
     property color md3OnPrimary: "#FFFFFF"
     property color md3PrimaryContainer: "#D8E2FF"
@@ -171,6 +173,9 @@ Rectangle {
         }
         aiSession.streaming = true
         aiSession.streamingText = ""
+        // The service emits chatStarted synchronously; set the visual state
+        // before sendMessage so the ball never misses the receiving phase.
+        if (root.emotionBall) root.emotionBall.setAiState("receiving")
 
         var refs = []
         if (aiUi && aiUi.referencedPosts) {
@@ -203,16 +208,19 @@ Rectangle {
 
         function onChatStarted(reqId) {
             if (reqId !== aiSession.currentRequestId) return
+            if (root.emotionBall) root.emotionBall.setAiState("receiving")
         }
 
         function onChatChunk(reqId, delta) {
             if (reqId !== aiSession.currentRequestId) return
+            if (root.emotionBall) root.emotionBall.setAiState("replying")
             aiSession.streamingText += delta
             scrollToBottom()
         }
 
         function onChatDone(reqId, fullText, proposedBody) {
             if (reqId !== aiSession.currentRequestId) return
+            if (root.emotionBall) root.emotionBall.setAiState("done")
             aiSession.streaming = false
             aiSession.streamingText = ""
 
@@ -228,6 +236,7 @@ Rectangle {
 
         function onChatError(reqId, message) {
             if (reqId !== aiSession.currentRequestId) return
+            if (root.emotionBall) root.emotionBall.setAiState("error")
             aiSession.streaming = false
             aiSession.streamingText = ""
             appendMessage({ role: "error", content: message || "请求失败", ts: Date.now() })
@@ -407,18 +416,40 @@ Rectangle {
                                 anchors.leftMargin: isUser ? 0 : 4
                                 anchors.rightMargin: isUser ? 4 : 0
                                 layoutDirection: isUser ? Qt.RightToLeft : Qt.LeftToRight
+                                opacity: 0
+                                scale: 0.97
+                                Component.onCompleted: messageEnter.start()
+
+                                ParallelAnimation {
+                                    id: messageEnter
+                                    NumberAnimation { target: msgRow; property: "opacity"; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                                    NumberAnimation { target: msgRow; property: "scale"; to: 1; duration: 220; easing.type: Easing.OutCubic }
+                                }
 
                                 // User avatar
                                 Rectangle {
                                     width: 28; height: 28; radius: 14
-                                    color: root.md3Primary
+                                    color: root.md3Surface
                                     visible: isUser
+                                    clip: true
+
+                                    Image {
+                                        id: userAvatarImage
+                                        anchors.fill: parent
+                                        anchors.margins: 2
+                                        visible: status === Image.Ready
+                                        source: root.userAvatarSource
+                                        sourceSize: Qt.size(56, 56)
+                                        fillMode: Image.PreserveAspectCrop
+                                        smooth: true
+                                    }
 
                                     Text {
                                         anchors.centerIn: parent
                                         text: root.userAvatarChar
                                         font.pixelSize: 12; font.weight: Font.Bold
                                         color: root.md3OnPrimary
+                                        visible: userAvatarImage.status !== Image.Ready
                                     }
                                 }
 
@@ -516,6 +547,39 @@ Rectangle {
                         anchors.leftMargin: 8; anchors.rightMargin: 8
                         spacing: 4
 
+                        Flow {
+                            visible: aiUi && aiUi.referencedPosts && aiUi.referencedPosts.length > 0
+                            width: parent.width
+                            height: visible ? 26 : 0
+                            spacing: 6
+                            Repeater {
+                                model: aiUi && aiUi.referencedPosts ? aiUi.referencedPosts : []
+                                delegate: Rectangle {
+                                    id: refChip
+                                    width: Math.min(180, refLabel.implicitWidth + 28)
+                                    height: 24
+                                    radius: 12
+                                    color: root.md3PrimaryContainer
+                                    opacity: 0
+                                    Component.onCompleted: refEnter.start()
+                                    ParallelAnimation {
+                                        id: refEnter
+                                        NumberAnimation { target: refChip; property: "opacity"; to: 1; duration: 160; easing.type: Easing.OutCubic }
+                                        NumberAnimation { target: refChip; property: "scale"; from: 0.94; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                                    }
+                                    Text {
+                                        id: refLabel
+                                        anchors.centerIn: parent
+                                        width: parent.width - 18
+                                        text: "引用 · " + (modelData.title || modelData.name || "文章")
+                                        color: root.md3OnPrimaryContainer
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                        }
+
                         ScrollView {
                             width: parent.width
                             height: Math.min(Math.max(inputArea.implicitHeight, 36), 120)
@@ -556,6 +620,7 @@ Rectangle {
                                             appContext.aiChat.cancel()
                                             aiSession.streaming = false
                                             aiSession.streamingText = ""
+                                            if (root.emotionBall) root.emotionBall.setAiState("idle")
                                         } else {
                                             root.sendChat()
                                         }

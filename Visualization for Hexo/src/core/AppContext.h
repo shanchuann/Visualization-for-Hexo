@@ -98,6 +98,11 @@ public:
     Q_INVOKABLE void stopCurrentTask();
     Q_INVOKABLE void submitConsoleInput(const QString &text);
 
+    // Native window state helpers used by the frameless shell on Windows.
+    Q_INVOKABLE void maximizeWindow();
+    Q_INVOKABLE void restoreWindow();
+    void setWindowHandle(quintptr handle);
+
     Q_INVOKABLE void scanPosts();
     Q_INVOKABLE void openPost(const QString &filePath);
     Q_INVOKABLE void saveOpenedPost(const QString &title,
@@ -194,6 +199,7 @@ signals:
     void trashItemsChanged();
 
 private:
+    quintptr m_windowHandle = 0;
     struct PostData {
         QString path;
         QString title;

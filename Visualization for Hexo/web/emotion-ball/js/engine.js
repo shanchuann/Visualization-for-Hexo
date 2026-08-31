@@ -478,6 +478,22 @@
         self.setEmotion(ids[i], { auto: true });
       }, interval);
     },
+    startRandomTour: function (ids, interval) {
+      this.stopTour();
+      if (!ids || !ids.length) return;
+      interval = interval || 6500;
+      this._touring = true;
+      var self = this;
+      var previous = null;
+      function next() {
+        var candidates = ids.filter(function (id) { return id !== previous; });
+        var id = candidates[Math.floor(Math.random() * candidates.length)];
+        previous = id;
+        self.setEmotion(id, { auto: true });
+      }
+      next();
+      this._tourTimer = setInterval(next, interval);
+    },
     stopTour: function () {
       if (this._tourTimer) { clearInterval(this._tourTimer); this._tourTimer = 0; }
       this._touring = false;

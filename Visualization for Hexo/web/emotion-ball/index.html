@@ -37,7 +37,10 @@
 
   // Bridge API exposed to the Qt host via runJavaScript
   window.ballSetEmotion = function (id) { try { __ball.setEmotion(String(id)); return true; } catch (e) { return false; } };
-  window.ballWake = function () { try { __ball.setEmotion('07'); return true; } catch (e) { return false; } };
+  window.ballSetGaze = function (x, y) { try { __ball.setGaze(Number(x), Number(y)); return true; } catch (e) { return false; } };
+  window.ballWake = function () { try { __ball.setEmotion('01'); return true; } catch (e) { return false; } };
+  window.ballStartRandomTour = function (ids, interval) { try { __ball.startRandomTour(ids, interval); return true; } catch (e) { return false; } };
+  window.ballStopTour = function () { try { __ball.stopTour(); return true; } catch (e) { return false; } };
   window.ballBounce = function () { try { __ball.bounce(); return true; } catch (e) { return false; } };
   window.ballBurst = function () { try { __ball.burst(16); return true; } catch (e) { return false; } };
   window.ballSpin = function () { try { __ball.spin(2); return true; } catch (e) { return false; } };

@@ -31,7 +31,7 @@ ApplicationWindow {
     y: 0
     minimumWidth: 1100
     minimumHeight: 700
-    title: "Visualization for Hexo"
+    title: "BlueSheep 蓝羊羊"
     flags: Qt.Window | Qt.FramelessWindowHint
     color: layoutBg
     onClosing: {
@@ -151,6 +151,9 @@ ApplicationWindow {
     property int previewDebounceMs: 320
     property bool consoleVisible: false
     property bool consoleExpanded: true
+    property string consoleInputBuffer: ""
+    property string consoleTerminalPrefix: ""
+    property bool consoleTerminalSyncing: false
     property bool aiKeyEditing: false
     property bool sidebarSearchMode: false
     property string sidebarSearchQuery: ""
@@ -245,8 +248,14 @@ ApplicationWindow {
     function enterAiEditMode() {
         if (!appContext.openedPostPath) return
         ballMenuPopup.close()
+        emotionBall.setAiState("waiting")
         aiChatDialog.open()
         Qt.callLater(function() { root.positionAiChatDialog() })
+    }
+
+    function createNewArticle() {
+        if (typeof appContext === "undefined" || !appContext) return
+        appContext.newPost("未命名文章", "未分类", "")
     }
 
     // Anchor the AI surface to the ball while keeping it inside the window.
@@ -288,6 +297,7 @@ ApplicationWindow {
             return
         }
         aiChatDialog.close()
+        emotionBall.setAiState("idle")
         aiUi.referencedPosts = []
         if (appContext.aiChat) appContext.aiChat.cancel()
     }
@@ -402,6 +412,12 @@ ApplicationWindow {
         windowStateRefreshTimer.restart()
     }
 
+    Shortcut {
+        sequence: "Escape"
+        enabled: root.isWindowFullScreen
+        onActivated: root.restoreNormalGeometry()
+    }
+
     function forceMainLayoutSync() {
         if (mainContentSplit) {
             mainContentSplit.forceLayout()
@@ -440,11 +456,17 @@ ApplicationWindow {
 
     function restoreNormalGeometry() {
         root.maximizeToggleActive = false
-        root.showNormal()
-        root.x = normalWindowX
-        root.y = normalWindowY
-        root.width = normalWindowWidth
-        root.height = normalWindowHeight
+        if (Qt.platform.os === "windows") {
+            appContext.restoreWindow()
+        } else {
+            root.showNormal()
+        }
+        Qt.callLater(function() {
+            root.x = normalWindowX
+            root.y = normalWindowY
+            root.width = normalWindowWidth
+            root.height = normalWindowHeight
+        })
     }
 
     function rememberNormalWindowGeometry() {
@@ -458,7 +480,11 @@ ApplicationWindow {
     function showWindowMaximizedSafe() {
         root.rememberNormalWindowGeometry()
         root.maximizeToggleActive = true
-        root.showMaximized()
+        if (Qt.platform.os === "windows") {
+            appContext.maximizeWindow()
+        } else {
+            root.showMaximized()
+        }
         windowStateRefreshTimer.restart()
     }
 
@@ -606,7 +632,59 @@ ApplicationWindow {
         root.consoleVisible = !root.consoleVisible;
         if (root.consoleVisible) {
             root.consoleExpanded = true;
+            Qt.callLater(function() {
+                root.syncConsoleTerminal()
+                if (settingsTerminal) settingsTerminal.forceActiveFocus()
+            })
         }
+    }
+
+    function syncConsoleTerminal() {
+        if (!settingsTerminal || !appContext) return
+        var log = appContext.logText || ""
+        if (log.length > 0 && !log.endsWith("\n")) log += "\n"
+        root.consoleTerminalSyncing = true
+        root.consoleTerminalPrefix = log + "PS> "
+        settingsTerminal.text = root.consoleTerminalPrefix + root.consoleInputBuffer
+        settingsTerminal.cursorPosition = settingsTerminal.text.length
+        root.consoleTerminalSyncing = false
+    }
+
+    function submitConsoleEditorLine() {
+        var cmd = root.consoleInputBuffer.trim()
+        if (cmd.length === 0) {
+            return
+        }
+        if (root.consoleCommandHistory.length === 0
+            || root.consoleCommandHistory[root.consoleCommandHistory.length - 1] !== cmd) {
+            root.consoleCommandHistory.push(cmd)
+        }
+        root.consoleHistoryIndex = -1
+        root.consoleInputBuffer = ""
+        root.syncConsoleTerminal()
+        appContext.submitConsoleInput(cmd)
+    }
+
+    function navigateConsoleHistory(direction) {
+        if (root.consoleCommandHistory.length === 0) return
+        if (direction < 0) {
+            if (root.consoleHistoryIndex < 0) {
+                root.consoleHistoryIndex = root.consoleCommandHistory.length - 1
+            } else if (root.consoleHistoryIndex > 0) {
+                root.consoleHistoryIndex -= 1
+            }
+        } else {
+            if (root.consoleHistoryIndex < 0) return
+            root.consoleHistoryIndex += 1
+            if (root.consoleHistoryIndex >= root.consoleCommandHistory.length) {
+                root.consoleHistoryIndex = -1
+                root.consoleInputBuffer = ""
+                root.syncConsoleTerminal()
+                return
+            }
+        }
+        root.consoleInputBuffer = root.consoleCommandHistory[root.consoleHistoryIndex]
+        root.syncConsoleTerminal()
     }
 
     component IconActionButton: Button {
@@ -1296,7 +1374,7 @@ ApplicationWindow {
             appContext.scanTrash()
         }
         if (root.settingsTabIndex === 2) {
-            root.backupHistory = appContext.gitLogSync(20)
+            root.backupHistory = appContext.gitLogSync(5)
         }
     }
 
@@ -1655,9 +1733,10 @@ ApplicationWindow {
 
         // ==================== Left Sidebar (Posts List) ====================
         Item {
+            id: sidebarPane
             SplitView.preferredWidth: root.fixedSidebarWidth
-            SplitView.minimumWidth: root.fixedSidebarWidth
-            SplitView.maximumWidth: root.fixedSidebarWidth
+            SplitView.minimumWidth: sidebar.visible ? root.fixedSidebarWidth : 0
+            SplitView.maximumWidth: sidebar.visible ? root.fixedSidebarWidth : 0
 
             Rectangle {
                 id: sidebar
@@ -1665,7 +1744,7 @@ ApplicationWindow {
                 anchors.margins: 8
                 anchors.leftMargin: 12
                 anchors.topMargin: 10
-                anchors.bottomMargin: 12
+                anchors.bottomMargin: root.isWindowMaximized ? 0 : 12
                 radius: 16
                 color: root.sidePanelBg
                 visible: true
@@ -1996,7 +2075,7 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.margins: 8
                 anchors.topMargin: 10
-                anchors.bottomMargin: 12
+                anchors.bottomMargin: root.isWindowMaximized ? 0 : 12
                 anchors.rightMargin: 12
                 radius: 16
                 color: root.readingPaper
@@ -2430,13 +2509,22 @@ ApplicationWindow {
         width: 500
         height: root.height - titleBar.height
         background: Item {}
+        onOpened: {
+            if (root.consoleVisible) {
+                Qt.callLater(function() {
+                    root.syncConsoleTerminal()
+                    if (settingsTerminal) settingsTerminal.forceActiveFocus()
+                })
+            }
+        }
 
         Rectangle {
             anchors.fill: parent
             anchors.leftMargin: 12
+            anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
-            radius: 20
+            radius: 16
             color: root.md3SurfaceContainerLowest
             border.width: 1
             border.color: Qt.rgba(0, 0, 0, 0.08)
@@ -2454,38 +2542,52 @@ ApplicationWindow {
 
                 ColumnLayout {
                     id: settingsContent
-                    width: parent.width - 48
-                    x: 24
-                    y: 24
+                    width: parent.width - 40
+                    x: 20
+                    y: 20
                     height: implicitHeight
-                    spacing: 16
+                    spacing: 12
 
                     // ---- Header ----
                     RowLayout {
                         Layout.fillWidth: true
+                        spacing: 10
                         Text {
                             text: "配置中心"
                             font.pixelSize: 22
                             font.weight: Font.DemiBold
                             color: root.md3OnSurface
-                            Layout.fillWidth: true
+                            Layout.preferredWidth: implicitWidth
+                            Layout.minimumWidth: implicitWidth
                         }
+                        ColumnLayout {
+                            Layout.preferredWidth: 190
+                            Layout.maximumWidth: 190
+                            Layout.minimumWidth: 0
+                            spacing: 1
+                            Text {
+                                text: "博客路径"
+                                color: root.md3OnSurfaceVariant
+                                font.pixelSize: 10
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                text: (appContext.currentProjectPath && appContext.currentProjectPath.length > 0
+                                       ? appContext.currentProjectPath : "未选择")
+                                color: root.md3OnSurface
+                                font.pixelSize: 11
+                                elide: Text.ElideMiddle
+                                Layout.fillWidth: true
+                            }
+                        }
+                        Item { Layout.fillWidth: true }
                         IconActionButton { iconSource: root.iconBase + "close.png"; toolTipText: "关闭"; onClicked: settingsDrawer.close() }
-                    }
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: (appContext.currentProjectPath && appContext.currentProjectPath.length > 0
-                               ? appContext.currentProjectPath : "未选择项目")
-                        color: root.md3OnSurfaceVariant
-                        font.pixelSize: 12
-                        elide: Text.ElideMiddle
                     }
 
                     Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: 56
-                        radius: root.shapeLarge
+                        radius: root.shapeMedium
                         color: root.md3SurfaceContainerLow
 
                         RowLayout {
@@ -2516,34 +2618,19 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
                             }
-                        }
-                    }
 
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: 64
-                        radius: root.shapeLarge
-                        color: root.md3SurfaceContainerLow
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 14
-                            anchors.rightMargin: 14
-                            spacing: 10
-
-                            Text {
-                                text: "控制台"
-                                font.pixelSize: 15
-                                font.weight: Font.Medium
-                                color: root.md3OnSurface
-                                Layout.preferredWidth: 58
-                            }
-
-                            UiButton {
-                                Layout.fillWidth: true
-                                text: root.consoleVisible ? "隐藏控制台" : "显示控制台"
-                                tone: root.consoleVisible ? "outlined" : "tonal"
-                                compact: true
+                            IconActionButton {
+                                Layout.alignment: Qt.AlignVCenter
+                                width: 30
+                                height: 30
+                                iconSource: root.iconBase + "ctrl.png"
+                                toolTipText: root.consoleVisible ? "隐藏控制台" : "显示控制台"
+                                background: Rectangle {
+                                    radius: 9
+                                    color: root.consoleVisible
+                                        ? Qt.rgba(root.md3Primary.r, root.md3Primary.g, root.md3Primary.b, 0.14)
+                                        : (parent.hovered ? root.hoverOverlay(true) : "transparent")
+                                }
                                 onClicked: root.toggleConsoleVisibility()
                             }
                         }
@@ -2553,7 +2640,8 @@ ApplicationWindow {
                         visible: root.consoleVisible
                         Layout.fillWidth: true
                         implicitHeight: 260
-                        color: root.md3InverseSurface
+                        color: root.md3SurfaceContainer
+                        radius: root.shapeMedium
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -2564,7 +2652,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 34
                                 radius: root.shapeSmall
-                                color: Qt.darker(root.md3InverseSurface, 1.1)
+                                color: root.md3SurfaceContainer
 
                                 RowLayout {
                                     anchors.fill: parent
@@ -2573,8 +2661,8 @@ ApplicationWindow {
                                     spacing: 8
 
                                     Text {
-                                        text: "控制台日志"
-                                        color: root.md3InverseOnSurface
+                                        text: "控制台"
+                                        color: root.md3OnSurface
                                         font.pixelSize: 13
                                         font.weight: Font.Medium
                                         Layout.fillWidth: true
@@ -2591,10 +2679,9 @@ ApplicationWindow {
                                 ScrollBar.horizontal: PageScrollBar {}
 
                                 TextArea {
-                                    id: settingsLogText
-                                    readOnly: true
-                                    text: appContext.logText
-                                    color: root.md3InverseOnSurface
+                                    id: settingsTerminal
+                                    text: root.consoleTerminalPrefix + root.consoleInputBuffer
+                                    color: root.md3OnSurface
                                     font.family: "Consolas"
                                     font.pixelSize: 13
                                     textFormat: TextEdit.PlainText
@@ -2602,85 +2689,58 @@ ApplicationWindow {
                                     selectByMouse: true
                                     selectByKeyboard: true
                                     persistentSelection: true
-                                    leftPadding: 0
-                                    rightPadding: 0
-                                    topPadding: 0
-                                    bottomPadding: 0
-                                    background: null
-                                    opacity: 0.9
+                                    leftPadding: 10
+                                    rightPadding: 10
+                                    topPadding: 8
+                                    bottomPadding: 8
+                                    background: Rectangle {
+                                        radius: root.shapeSmall
+                                        color: root.md3SurfaceContainerLowest
+                                    }
+                                    opacity: 1
                                     onTextChanged: {
-                                        Qt.callLater(function() {
-                                            if (settingsConsoleScroll.contentItem) {
-                                                settingsConsoleScroll.contentItem.contentY =
-                                                    Math.max(0, settingsConsoleScroll.contentItem.contentHeight - settingsConsoleScroll.contentItem.height)
-                                            }
-                                        })
+                                        if (root.consoleTerminalSyncing) return
+                                        if (root.consoleTerminalPrefix.length === 0
+                                            || !text.startsWith(root.consoleTerminalPrefix)) {
+                                            root.syncConsoleTerminal()
+                                        } else {
+                                            root.consoleInputBuffer = text.substring(root.consoleTerminalPrefix.length)
+                                        }
                                     }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 34
-                                radius: root.shapeSmall
-                                color: Qt.darker(root.md3InverseSurface, 1.15)
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 10
-                                    anchors.rightMargin: 10
-                                    spacing: 6
-
-                                    Text {
-                                        text: ">"
-                                        color: root.md3InversePrimary
-                                        font.pixelSize: 13
-                                        font.weight: Font.Medium
-                                        Layout.preferredWidth: 12
+                                    onCursorPositionChanged: {
+                                        if (!root.consoleTerminalSyncing
+                                            && cursorPosition < root.consoleTerminalPrefix.length) {
+                                            cursorPosition = root.consoleTerminalPrefix.length
+                                        }
                                     }
+                                    Keys.onPressed: function(event) {
+                                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                            event.accepted = true
+                                            root.submitConsoleEditorLine()
+                                        } else if (event.key === Qt.Key_Up) {
+                                            event.accepted = true
+                                            root.navigateConsoleHistory(-1)
+                                        } else if (event.key === Qt.Key_Down) {
+                                            event.accepted = true
+                                            root.navigateConsoleHistory(1)
+                                        } else if (event.key === Qt.Key_C
+                                                   && (event.modifiers & Qt.ControlModifier)) {
+                                            event.accepted = true
+                                            appContext.submitConsoleInput("ctrl+c")
+                                        }
+                                    }
+                                    Component.onCompleted: root.syncConsoleTerminal()
 
-                                    TextInput {
-                                        id: settingsConsoleInput
-                                        Layout.fillWidth: true
-                                        color: root.md3InverseOnSurface
-                                        font.family: "Consolas"
-                                        font.pixelSize: 13
-                                        selectByMouse: true
-                                        clip: true
-                                        text: ""
-
-                                        onAccepted: {
-                                            var cmd = text.trim()
-                                            if (cmd.length > 0) {
-                                                if (root.consoleCommandHistory.length === 0 || root.consoleCommandHistory[root.consoleCommandHistory.length - 1] !== cmd) {
-                                                    root.consoleCommandHistory.push(cmd)
+                                    Connections {
+                                        target: appContext
+                                        function onLogTextChanged() {
+                                            root.syncConsoleTerminal()
+                                            Qt.callLater(function() {
+                                                if (settingsConsoleScroll.contentItem) {
+                                                    settingsConsoleScroll.contentItem.contentY =
+                                                        Math.max(0, settingsConsoleScroll.contentItem.contentHeight - settingsConsoleScroll.contentItem.height)
                                                 }
-                                                root.consoleHistoryIndex = -1
-                                                appContext.submitConsoleInput(cmd)
-                                                text = ""
-                                            }
-                                        }
-
-                                        Keys.onUpPressed: {
-                                            if (root.consoleCommandHistory.length === 0) return
-                                            if (root.consoleHistoryIndex < 0) {
-                                                root.consoleHistoryIndex = root.consoleCommandHistory.length - 1
-                                            } else if (root.consoleHistoryIndex > 0) {
-                                                root.consoleHistoryIndex -= 1
-                                            }
-                                            text = root.consoleCommandHistory[root.consoleHistoryIndex]
-                                        }
-
-                                        Keys.onDownPressed: {
-                                            if (root.consoleCommandHistory.length === 0) return
-                                            if (root.consoleHistoryIndex < 0) return
-                                            root.consoleHistoryIndex += 1
-                                            if (root.consoleHistoryIndex >= root.consoleCommandHistory.length) {
-                                                root.consoleHistoryIndex = -1
-                                                text = ""
-                                            } else {
-                                                text = root.consoleCommandHistory[root.consoleHistoryIndex]
-                                            }
+                                            })
                                         }
                                     }
                                 }
@@ -2690,22 +2750,22 @@ ApplicationWindow {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 58
+                        height: 48
                         radius: root.shapeMedium
                         color: root.md3SurfaceContainer
 
                         RowLayout {
                             anchors.fill: parent
                             anchors.margins: 5
-                            spacing: 4
+                            spacing: 3
 
                             Repeater {
                                 model: [
-                                    { label: "编辑器", icon: "edit.png" },
-                                    { label: "站点", icon: "setting.png" },
-                                    { label: "项目与 AI", icon: "ai-magic.png" },
-                                    { label: "统计", icon: "preview-open.png" },
-                                    { label: "回收站", icon: "delete.png" }
+                                    "编辑器",
+                                    "站点",
+                                    "项目与 AI",
+                                    "统计",
+                                    "回收站"
                                 ]
                                 delegate: Rectangle {
                                     Layout.fillWidth: true
@@ -2718,40 +2778,15 @@ ApplicationWindow {
                                         : "transparent"
                                     border.width: 0
 
-                                    Column {
+                                    Text {
                                         anchors.centerIn: parent
-                                        spacing: 3
-
-                                        Rectangle {
-                                            width: 22
-                                            height: 22
-                                            radius: 12
-                                            color: root.settingsTabIndex === index
-                                                ? root.md3Primary
-                                                : root.md3PrimaryContainer
-                                            anchors.horizontalCenter: parent.horizontalCenter
-
-                                            IconImage {
-                                                anchors.centerIn: parent
-                                                width: 13
-                                                height: 13
-                                                source: root.iconBase + modelData.icon
-                                                color: root.settingsTabIndex === index
-                                                    ? root.md3OnPrimary
-                                                    : root.md3OnSurface
-                                            }
-                                        }
-
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: modelData.label
-                                            font.pixelSize: 11
-                                            font.weight: Font.Medium
-                                            color: root.settingsTabIndex === index
-                                                ? root.md3Primary
-                                                : root.md3OnSurface
-                                            horizontalAlignment: Text.AlignHCenter
-                                        }
+                                        text: modelData
+                                        font.pixelSize: 12
+                                        font.weight: Font.Medium
+                                        color: root.settingsTabIndex === index
+                                            ? root.md3Primary
+                                            : root.md3OnSurface
+                                        horizontalAlignment: Text.AlignHCenter
                                     }
 
                                     MouseArea {
@@ -2773,7 +2808,7 @@ ApplicationWindow {
                             id: textDisplayCol
                             anchors.fill: parent
                             anchors.margins: 20
-                            spacing: 12
+                            spacing: 8
 
                             Text { text: "文字显示"; font.pixelSize: 16; font.weight: Font.DemiBold; color: root.md3OnSurface }
 
@@ -2915,7 +2950,7 @@ ApplicationWindow {
                                     id: projectOpsCol
                                     anchors.fill: parent
                                     anchors.margins: 10
-                                    spacing: 8
+                                    spacing: 6
 
                                     RowLayout {
                                         Layout.fillWidth: true
@@ -2965,7 +3000,7 @@ ApplicationWindow {
 
                             UiCard {
                                 Layout.fillWidth: true
-                                implicitHeight: Math.max(120, projectListView.contentHeight + 16)
+                                implicitHeight: Math.max(68, projectListView.contentHeight + 12)
                                 color: root.md3SurfaceContainer
 
                                 ListView {
@@ -3197,7 +3232,7 @@ ApplicationWindow {
                             target: appContext
                             function onTaskRunningChanged() {
                                 if (!appContext.taskRunning && root.settingsTabIndex === 2)
-                                    root.backupHistory = appContext.gitLogSync(20)
+                                    root.backupHistory = appContext.gitLogSync(5)
                             }
                         }
 
@@ -3261,7 +3296,7 @@ ApplicationWindow {
                                 UiButton {
                                     text: "设置"
                                     compact: true
-                                    implicitWidth: 56
+                                    implicitWidth: 72
                                     onClicked: appContext.gitSetRemote(remoteUrlInput.text)
                                 }
                             }
@@ -3304,7 +3339,7 @@ ApplicationWindow {
                                     width: 24; height: 24
                                     iconSource: root.iconBase + "play.png"
                                     toolTipText: "刷新记录"
-                                    onClicked: root.backupHistory = appContext.gitLogSync(20)
+                                    onClicked: root.backupHistory = appContext.gitLogSync(5)
                                 }
                             }
 
@@ -4057,6 +4092,7 @@ ApplicationWindow {
         Rectangle {
             anchors.fill: parent
             anchors.leftMargin: 12
+            anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
             radius: 16
@@ -4416,7 +4452,7 @@ ApplicationWindow {
     Dialog {
         id: firstRunDialog
         modal: true
-        title: "欢迎使用 Visualization for Hexo"
+        title: "欢迎使用 BlueSheep 蓝羊羊"
         standardButtons: Dialog.Ok
         anchors.centerIn: Overlay.overlay
         onAccepted: appContext.completeFirstRun()
@@ -4885,14 +4921,14 @@ ApplicationWindow {
         acceptedButtons: Qt.NoButton
 
         onPositionChanged: function(mouse) {
-            if (containsMouse && !ballMenuPopup.opened) {
+            if (containsMouse && !ballMenuPopup.opened && !emotionBall.aiActive) {
                 var globalPos = mapToItem(null, mouse.x, mouse.y)
                 emotionBall.updateEyeTarget(globalPos.x, globalPos.y)
             }
         }
 
         onExited: {
-            if (!ballMenuPopup.opened) {
+            if (!ballMenuPopup.opened && !emotionBall.aiActive && !emotionBall.idleTouring) {
                 emotionBall.setEmotion("02")
             }
         }
@@ -4913,6 +4949,10 @@ ApplicationWindow {
 
         onAiEditRequested: {
             root.enterAiEditMode()
+        }
+
+        onNewArticleRequested: {
+            root.createNewArticle()
         }
 
         onViewModeToggleRequested: function(isMarkdown) {
@@ -5035,6 +5075,7 @@ ApplicationWindow {
         contentItem: AiChatPanel {
             aiSession: aiSession
             aiUi: aiUi
+            emotionBall: emotionBall
             md3Primary: root.md3Primary
             md3OnPrimary: root.md3OnPrimary
             md3PrimaryContainer: root.md3PrimaryContainer
