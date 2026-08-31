@@ -3,10 +3,14 @@
 
 </p>
 
+<div>
+
 <h1 style="text-align:center;">
   <img src="https://files.seeusercontent.com/2026/08/31/8iaC/app-icon.png" alt="BlueSheep" style="height:2em;vertical-align:middle;" />
   BlueSheep · 蓝羊羊
 </h1>
+
+</div>
 
 <p align="center">
 	<img src="https://img.shields.io/badge/project-BlueSheep-4c566a" alt="project" />
